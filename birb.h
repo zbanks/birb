@@ -21,9 +21,9 @@ enum {
     BIRB_MUL,
     BIRB_DIV,
     BIRB_MOD,
+    BIRB_DUP,
     //BIRB_ SHL? (y << x)
     //BIRB_ LTE? (y <= x)
-    //BIRB_ CPY? PUSH(x) PUSH(x)
     //BIRB_
     BIRB_END = 0xFF,
 };
@@ -59,6 +59,7 @@ birb_eval(const unsigned char * p, birb_t t) {
         case BIRB_MUL: x = POP(); y = POP(); PUSH(y * x); break;
         case BIRB_DIV: x = POP(); y = POP(); PUSH(x == 0 ? 0 : y / x); break;
         case BIRB_MOD: x = POP(); y = POP(); PUSH(x == 0 ? 0 : y % x); break;
+        case BIRB_DUP: x = POP(); PUSH(x); PUSH(x); break;
         default: PUSH(*p & 0xF); break;
         }
     }
