@@ -123,7 +123,7 @@ unsigned char *random_program(unsigned int seed) {
         }
         data[RANDOM_LEN] = END;
         // Require time dependence
-        if (birb_eval(data, (birb_t) rand()) != birb_eval(data, (birb_t) rand())) {
+        if (birb_eval(data, (birb_t) rand(), 0) != birb_eval(data, (birb_t) rand(), 0)) {
             return data;
         }
     }
@@ -134,7 +134,7 @@ int main() {
     for (const struct program * program = programs; program->name != NULL; program++) {
         fprintf(stderr, "%s\n", program->name);
         for (birb_t t = 0; t < 8196 * 10; t++) { // 10 seconds-ish
-            unsigned char val = (unsigned char) birb_eval(program->data, t);
+            unsigned char val = (unsigned char) birb_eval(program->data, t, 0);
             putchar(val);
         }
         for (birb_t t = 0; t < 4096; t++) putchar(0);
@@ -143,7 +143,7 @@ int main() {
     for (unsigned int i = 0; i < 10; i++) {
         unsigned char *data = random_program(i);
         for (birb_t t = 0; t < 8196 * 2; t++) { // 2 seconds-ish
-            unsigned char val = (unsigned char) birb_eval(data, t);
+            unsigned char val = (unsigned char) birb_eval(data, t, 0);
             putchar(val);
         }
         for (birb_t t = 0; t < 4096; t++) putchar(0);

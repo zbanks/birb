@@ -9,28 +9,30 @@
 typedef unsigned int birb_t;
 
 enum {
-    BIRB_T = 0x10,
-    BIRB_DIG,
-    BIRB_SWP,
-    BIRB_SHR,
-    BIRB_AND,
-    BIRB_OR,
-    BIRB_XOR,
-    BIRB_ADD,
-    BIRB_SUB,
-    BIRB_MUL,
-    BIRB_DIV,
-    BIRB_MOD,
-    BIRB_DUP,
+    BIRB_T   = 0x10,
+    BIRB_U   = 0x11,
+    BIRB_SHL = 0x12,
+    BIRB_SHR = 0x13,
+    BIRB_DIG = 0x14,
+    BIRB_AND = 0x15,
+    BIRB_OR  = 0x16,
+    BIRB_XOR = 0x17,
+    BIRB_ADD = 0x18,
+    BIRB_SUB = 0x19,
+    BIRB_MUL = 0x1A,
+    BIRB_DIV = 0x1B,
+    BIRB_MOD = 0x1C,
+    BIRB_SWP = 0x1D,
     //BIRB_ SHL? (y << x)
     //BIRB_ LTE? (y <= x)
+    //BIRB_ CPY? PUSH(x) PUSH(x)
     //BIRB_
     BIRB_END = 0xFF,
 };
 
 
 static inline birb_t
-birb_eval(const unsigned char * p, birb_t t) {
+birb_eval(const unsigned char * p, birb_t t, birb_t u) {
     static birb_t stack[BIRB_STACK_SIZE];
     int si = 0; // stack index
 
@@ -47,10 +49,10 @@ birb_eval(const unsigned char * p, birb_t t) {
     for (; *p != BIRB_END; p++) {
         switch (*p & 0x1F) {
         case BIRB_T: PUSH(t); break;
-        case BIRB_DIG: x = POP(); y = POP(); PUSH((x << 4) | y); break;
-        case BIRB_SWP: x = POP(); y = POP(); PUSH(x); PUSH(y); break;
-        //case BIRB_SHL: x = POP(); y = POP(); PUSH(y << x); break;
+        case BIRB_U: PUSH(u); break;
+        case BIRB_SHL: x = POP(); y = POP(); PUSH(y << x); break;
         case BIRB_SHR: x = POP(); y = POP(); PUSH(y >> x); break;
+        case BIRB_DIG: x = POP(); y = POP(); PUSH((x << 4) | y); break;
         case BIRB_AND: x = POP(); y = POP(); PUSH(y & x); break;
         case BIRB_OR:  x = POP(); y = POP(); PUSH(y | x); break;
         case BIRB_XOR: x = POP(); y = POP(); PUSH(y ^ x); break;
@@ -59,7 +61,7 @@ birb_eval(const unsigned char * p, birb_t t) {
         case BIRB_MUL: x = POP(); y = POP(); PUSH(y * x); break;
         case BIRB_DIV: x = POP(); y = POP(); PUSH(x == 0 ? 0 : y / x); break;
         case BIRB_MOD: x = POP(); y = POP(); PUSH(x == 0 ? 0 : y % x); break;
-        case BIRB_DUP: x = POP(); PUSH(x); PUSH(x); break;
+        case BIRB_SWP: x = POP(); y = POP(); PUSH(x); PUSH(y); break;
         default: PUSH(*p & 0xF); break;
         }
     }
@@ -73,8 +75,8 @@ birb_eval(const unsigned char * p, birb_t t) {
 #ifdef BIRB_SHORTHAND
 
 #define T   BIRB_T
+#define U   BIRB_U
 #define DIG BIRB_DIG
-#define SWP BIRB_SWP
 #define SHL BIRB_SHL
 #define SHR BIRB_SHR
 #define AND BIRB_AND
@@ -85,6 +87,7 @@ birb_eval(const unsigned char * p, birb_t t) {
 #define MUL BIRB_MUL
 #define DIV BIRB_DIV
 #define MOD BIRB_MOD
+#define SWP BIRB_SWP
 #define END BIRB_END
 #define A 0xA
 #define B 0xB
