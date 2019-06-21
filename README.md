@@ -19,6 +19,7 @@ After hitting the end of the program, top value on the stack is popped and retur
 
 Most opcodes pop 2 values from the stack (`x` then `y`) and push a single value back:
 - `BIRB_SHR`: `y >> x`
+- `BIRB_SHL`: `y << x`
 - `BIRB_AND`: `y & x`
 - `BIRB_OR`: `y | x`
 - `BIRB_XOR`: `y ^ x`
@@ -32,7 +33,7 @@ Most opcodes pop 2 values from the stack (`x` then `y`) and push a single value 
 Other opcodes that do not follow the above pattern:
 - `0x0` - `0xF`: Push the given opcode onto the stack
 - `BIRB_T`: Push the special variable `T` onto the stack
+- `BIRB_U`: Push the special variable `U` onto the stack
 - `BIRB_SWP`: Swap the position of the top two values on the stack
 - `BIRB_DUP`: Duplicate the top value on the stack
-
-There are also 3 opcodes which are currently unused and have undefined behavior, `0x1D` - `0x1F`
+- `BIRB_RND`: Pop `x` from the stack, then push `hash(x)` back

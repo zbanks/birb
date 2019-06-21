@@ -22,6 +22,17 @@ static const struct program {
     const unsigned char data[256];
 } programs[] = {
     {
+        .name = "rand(t)|(t*5&t>>5)",
+        .data = {
+            T, RND,
+            T, 5, MUL,
+            T, 5, SHR,
+                AND,
+                    OR,
+            END,
+        },
+    },
+    {
         .name = "(t*5&t>>7)|(t*3&t>>10)",
         .data = {
             T, 5, MUL,

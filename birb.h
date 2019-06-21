@@ -23,13 +23,21 @@ enum {
     BIRB_DIV = 0x1B,
     BIRB_MOD = 0x1C,
     BIRB_SWP = 0x1D,
-    //BIRB_ SHL? (y << x)
-    //BIRB_ LTE? (y <= x)
-    //BIRB_ CPY? PUSH(x) PUSH(x)
-    //BIRB_
+    BIRB_DUP = 0x1E,
+    BIRB_RND = 0x1F,
     BIRB_END = 0xFF,
 };
 
+static inline birb_t
+birb_hash(birb_t x) {
+    // lowhash32 from https://nullprogram.com/blog/2018/07/31/
+    x ^= x >> 16;
+    x *= 0x7feb352dU;
+    x ^= x >> 15;
+    x *= 0x846ca68bU;
+    x ^= x >> 16;
+    return x;
+}
 
 static inline birb_t
 birb_eval(const unsigned char * p, birb_t t, birb_t u) {
@@ -62,6 +70,8 @@ birb_eval(const unsigned char * p, birb_t t, birb_t u) {
         case BIRB_DIV: x = POP(); y = POP(); PUSH(x == 0 ? 0 : y / x); break;
         case BIRB_MOD: x = POP(); y = POP(); PUSH(x == 0 ? 0 : y % x); break;
         case BIRB_SWP: x = POP(); y = POP(); PUSH(x); PUSH(y); break;
+        case BIRB_DUP: x = POP(); PUSH(x); PUSH(x); break;
+        case BIRB_RND: x = POP(); PUSH(birb_hash(x)); break;
         default: PUSH(*p & 0xF); break;
         }
     }
@@ -88,6 +98,8 @@ birb_eval(const unsigned char * p, birb_t t, birb_t u) {
 #define DIV BIRB_DIV
 #define MOD BIRB_MOD
 #define SWP BIRB_SWP
+#define DUP BIRB_DUP
+#define RND BIRB_RND
 #define END BIRB_END
 #define A 0xA
 #define B 0xB
