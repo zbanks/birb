@@ -1,0 +1,21 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP H11L2
+D Schmitt Trigger Output Optocoupler, High Speed, DIP-6, 10mA turn on threshold
+K High Speed Schmitt Optocoupler
+F https://www.onsemi.com/pub/Collateral/H11L3M-D.PDF
+$ENDCMP
+#
+$CMP H11L3
+D Schmitt Trigger Output Optocoupler, High Speed, DIP-6, 5mA turn on threshold
+K High Speed Schmitt Optocoupler
+F https://www.onsemi.com/pub/Collateral/H11L3M-D.PDF
+$ENDCMP
+#
+$CMP TLP2312
+D Schmitt Trigger Output Optocoupler, High Speed, DIP-6, 1.6mA turn on threshold
+K High Speed Schmitt Optocoupler
+F https://www.onsemi.com/pub/Collateral/H11L3M-D.PDF
+$ENDCMP
+#
+#End Doc Library
