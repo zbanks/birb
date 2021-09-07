@@ -1412,4 +1412,6 @@ Wire Wire Line
 Wire Wire Line
 	10050 2650 10650 2650
 NoConn ~ 10050 3250
+Text Notes 1550 9200 0    50   ~ 0
+Notes:\nC10 -> 100uF\nC11 -> 0ohm jumper\nAdd 100ohm to filter to avoid instability\nPut input gain stage before wet/dry mix\nConsider removing opamps and using some inverting ones\nUse dedicated headphone output chip\nConsider biasing the volume slightly better? Or check that all opamps can truly hit bottom rail\nadd biasing to knob so 10-bit ADC conversions can actually hit zero and 255
 $EndSCHEMATC
