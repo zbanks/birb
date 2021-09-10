@@ -30,15 +30,147 @@ static uint8_t note_velocity[MAX_NOTES];
 static uint8_t triggered_note;
 static uint8_t triggered_velocity;
 static uint16_t target_velocity;
-static uint16_t velocity_change_rate;
-static uint16_t real_velocity;
+static uint16_t velocity_change_rate = 10;
+static uint8_t real_velocity;
 
 static uint16_t arp_counter;
 static uint8_t arp_index;
-static uint8_t decay_counter;
+static uint16_t decay_counter;
 
 static uint16_t frac_note;
 static uint8_t frac_note_counter;
+
+struct adsr_state {
+    enum {
+        ADSR_OFF,
+        ADSR_ATTACK,
+        ADSR_DECAY,
+        ADSR_SUSTAIN,
+        ADSR_RELEASE,
+    } mode;
+    uint8_t a_incr;
+    uint8_t d_decr;
+    uint8_t s;
+    uint8_t r_decr;
+    uint8_t output;
+    uint8_t last_gate;
+};
+
+static struct adsr_state amp_env;
+static struct triangle_state amp_lfo;
+
+static void adsr_init(struct adsr_state *state, uint8_t a, uint8_t d, uint8_t s, uint8_t r) {
+    state->mode = ADSR_OFF;
+    if (a == 0) {
+        a = 1;
+    }
+    state->a_incr = 255 / a;
+    if (state->a_incr == 0) {
+        state->a_incr = 1;
+    }
+    if (d == 0) {
+        d = 1;
+    }
+    state->d_decr = (255 - s) / d;
+    if (state->d_decr == 0) {
+        state->d_decr = 1;
+    }
+    state->s = s;
+    if (r == 0) {
+        r = 1;
+    }
+    state->r_decr = s / r;
+    if (state->r_decr == 0) {
+        state->r_decr = 1;
+    }
+    state->output = 0;
+    state->last_gate = 0;
+}
+
+static uint8_t adsr_update(struct adsr_state *state, uint8_t gate) {
+    if ((state->mode == ADSR_OFF || state->mode == ADSR_RELEASE || gate != state->last_gate) && gate) {
+        state->mode = ADSR_ATTACK;
+        state->last_gate = gate;
+    } else if (state->output > 0 && !gate) {
+        state->mode = ADSR_RELEASE;
+    }
+    switch (state->mode) {
+        case ADSR_OFF:
+        case ADSR_SUSTAIN:
+            break;
+        case ADSR_ATTACK:
+            if (state->output >= 255 - state->a_incr) {
+                state->output = 255;
+                state->mode = ADSR_DECAY;
+            } else {
+                state->output += state->a_incr;
+            }
+            break;
+        case ADSR_DECAY:
+            if (state->output <= state->s + state->d_decr) {
+                state->output = state->s;
+                state->mode = ADSR_SUSTAIN;
+            } else {
+                state->output -= state->d_decr;
+            }
+            break;
+        case ADSR_RELEASE:
+            if (state->output <= state->r_decr) {
+                state->output = 0;
+                state->mode = ADSR_OFF;
+            } else {
+                state->output -= state->r_decr;
+            }
+            break;
+    }
+    return state->output;
+}
+
+struct triangle_state {
+    uint8_t up;
+    int16_t low;
+    int16_t high;
+    int16_t increment;
+    int16_t output;
+};
+
+static int16_t triangle_init(struct triangle_state *state, int16_t low, int16_t high, int16_t period) {
+    state->low = low;
+    state->high = high;
+    if (period == 0) {
+        period = 1;
+    }
+    state->increment = (high - low) / period;
+    if (state->increment == 0) {
+        state->increment = 1;
+    }
+    state->output = (low + high) >> 1;
+    state->up = 1;
+}
+
+static int16_t triangle_update(struct triangle_state *state) {
+    if (state->up) {
+        if (state->output > state->high - state->increment) {
+            state->output = state->high;
+            state->up = 0;
+        } else {
+            state->output += state->increment;
+        }
+    } else {
+        if (state->output < state->low + state->increment) {
+            state->output = state->low;
+            state->up = 1;
+        } else {
+            state->output -= state->increment;
+        }
+    }
+    return state->output;
+}
+
+static uint8_t triangle(uint8_t counter, uint8_t low, uint8_t high) {
+    uint8_t tri = counter < 128 ? counter : -counter;
+    return (low * (128 - tri) + high * tri);
+}
 
 static void rx(uint8_t byte) {
     static enum {
@@ -206,6 +338,10 @@ main (void)
     // Set audio interrupt at higher priority
     CPUINT.LVL1VEC = TCA0_OVF_vect_num;
 
+    adsr_init(&amp_env, 1, 20, 200, 255);
+    //adsr_init(&amp_env, 1, 255, 127, 255);
+    triangle_init(&amp_lfo, -255, 255, 255);
+
     sei();
     //uint8_t a = 0;
 
@@ -312,25 +448,41 @@ ISR (TCB0_INT_vect)
     triggered_note = note_index[arp_index];
     triggered_velocity = note_velocity[arp_index];
 
-    if (triggered_velocity > 0) {
-        target_velocity = triggered_velocity + 128; // Only use upper half of volume range
-        velocity_change_rate = 10;
-    } else {
-        target_velocity = 0;
-        velocity_change_rate = 10;
-    }
-
-    if (real_velocity != target_velocity) {
-        if (decay_counter > velocity_change_rate) {
-            //int16_t error = (int16_t)target_velocity - real_velocity;
-            //error = (error * 255) / 256;
-            //real_velocity = (int16_t)target_velocity - error;
-            if(real_velocity < target_velocity) real_velocity++;
-            if(real_velocity > target_velocity) real_velocity--;
-            decay_counter = 0;
+    if (decay_counter > velocity_change_rate) {
+        //real_velocity = ((uint16_t)adsr_update(&amp_env, triggered_velocity > 0 ? triggered_note + 1 : 0) * triggered_velocity) >> 8;
+        uint8_t vel = adsr_update(&amp_env, triggered_velocity > 0 ? triggered_note + 1 : 0);
+        int16_t vel_lfo = triangle_update(&amp_lfo);
+        if (vel + vel_lfo < 0 || vel == 0) {
+            vel = 0;
+        } else if (vel + vel_lfo > 255) {
+            vel = 255;
+        } else {
+            vel += vel_lfo;
         }
-        decay_counter++;
+        real_velocity = vel;
+        decay_counter = 0;
     }
+    decay_counter++;
+
+    //if (triggered_velocity > 0) {
+    //    target_velocity = triggered_velocity + 128; // Only use upper half of volume range
+    //    velocity_change_rate = 10;
+    //} else {
+    //    target_velocity = 0;
+    //    velocity_change_rate = 10;
+    //}
+
+    //if (real_velocity != target_velocity) {
+    //    if (decay_counter > velocity_change_rate) {
+    //        //int16_t error = (int16_t)target_velocity - real_velocity;
+    //        //error = (error * 255) / 256;
+    //        //real_velocity = (int16_t)target_velocity - error;
+    //        if(real_velocity < target_velocity) real_velocity++;
+    //        if(real_velocity > target_velocity) real_velocity--;
+    //        decay_counter = 0;
+    //    }
+    //    decay_counter++;
+    //}
     note_playing = real_velocity > 0;
 
     if (note_playing) {
@@ -378,8 +530,9 @@ ISR (TCA0_OVF_vect)
     t++;
     //if (knob == 0) t = 0;
 
-    if ((t & T_PERIOD_BM) == 0 && (triggered_note != last_note || real_velocity != last_velocity || 1)) {
+    if ((t & T_PERIOD_BM) == 0) {
         // Set osc as per new note
+        frac_note = 0;
         uint8_t ix = triggered_note + (frac_note >> 8);
         if (ix > 100) { // Highest note to avoid deadlock
             ix = 100;
