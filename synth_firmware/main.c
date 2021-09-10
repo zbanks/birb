@@ -90,10 +90,10 @@ static void adsr_init(struct adsr_state *state, uint8_t a, uint8_t d, uint8_t s,
 static uint8_t adsr_update(struct adsr_state *state, uint8_t gate) {
     if ((state->mode == ADSR_OFF || state->mode == ADSR_RELEASE || gate != state->last_gate) && gate) {
         state->mode = ADSR_ATTACK;
-        state->last_gate = gate;
     } else if (state->output > 0 && !gate) {
         state->mode = ADSR_RELEASE;
     }
+    state->last_gate = gate;
     switch (state->mode) {
         case ADSR_OFF:
         case ADSR_SUSTAIN:
@@ -128,19 +128,19 @@ static uint8_t adsr_update(struct adsr_state *state, uint8_t gate) {
 
 struct triangle_state {
     uint8_t up;
-    int16_t low;
-    int16_t high;
-    int16_t increment;
-    int16_t output;
+    int8_t low;
+    int8_t high;
+    int8_t increment;
+    int8_t output;
 };
 
-static int16_t triangle_init(struct triangle_state *state, int16_t low, int16_t high, int16_t period) {
+static int8_t triangle_init(struct triangle_state *state, int8_t low, int8_t high, int8_t period) {
     state->low = low;
     state->high = high;
     if (period == 0) {
         period = 1;
     }
-    state->increment = (high - low) / period;
+    state->increment = ((uint16_t)high - low) / period;
     if (state->increment == 0) {
         state->increment = 1;
     }
@@ -148,7 +148,7 @@ static int16_t triangle_init(struct triangle_state *state, int16_t low, int16_t 
     state->up = 1;
 }
 
-static int16_t triangle_update(struct triangle_state *state) {
+static int8_t triangle_update(struct triangle_state *state) {
     if (state->up) {
         if (state->output > state->high - state->increment) {
             state->output = state->high;
@@ -236,6 +236,7 @@ static void note_on(uint8_t k, uint8_t v) {
         if (note_velocity[i] == 0) {
             note_index[i] = k;
             note_velocity[i] = v;
+            arp_index = i;
             check_notes();
             return;
         }
@@ -246,6 +247,9 @@ static void note_off(uint8_t k) {
     for (int i = 0; i < MAX_NOTES; i++) {
         if (note_index[i] == k && note_velocity[i] > 0) {
             note_velocity[i] = 0;
+            if (arp_index >= i && arp_index > 0) {
+                arp_index--;
+            }
             for (int j = i + 1; j < MAX_NOTES; j++) {
                 // Shift held notes to keep the list coherent
                 if (note_velocity[j] == 0) {
@@ -340,7 +344,7 @@ main (void)
 
     adsr_init(&amp_env, 1, 20, 200, 255);
     //adsr_init(&amp_env, 1, 255, 127, 255);
-    triangle_init(&amp_lfo, -255, 255, 255);
+    triangle_init(&amp_lfo, -30, 30, 127);
 
     sei();
     //uint8_t a = 0;
@@ -451,10 +455,10 @@ ISR (TCB0_INT_vect)
     if (decay_counter > velocity_change_rate) {
         //real_velocity = ((uint16_t)adsr_update(&amp_env, triggered_velocity > 0 ? triggered_note + 1 : 0) * triggered_velocity) >> 8;
         uint8_t vel = adsr_update(&amp_env, triggered_velocity > 0 ? triggered_note + 1 : 0);
-        int16_t vel_lfo = triangle_update(&amp_lfo);
-        if (vel + vel_lfo < 0 || vel == 0) {
+        int8_t vel_lfo = triangle_update(&amp_lfo);
+        if ((int16_t)vel + vel_lfo < 0 || vel == 0) {
             vel = 0;
-        } else if (vel + vel_lfo > 255) {
+        } else if ((int16_t)vel + vel_lfo > 255) {
             vel = 255;
         } else {
             vel += vel_lfo;
