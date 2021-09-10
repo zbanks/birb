@@ -40,6 +40,17 @@ static uint16_t decay_counter;
 static uint16_t frac_note;
 static uint8_t frac_note_counter;
 
+static int8_t sadd(int8_t x, int8_t y) {
+    int16_t result = x + y;
+    if (result > 127) {
+        return 127;
+    } else if (result < -128) {
+        return -128;
+    } else {
+        return (int8_t)result;
+    }
+}
+
 struct adsr_state {
     enum {
         ADSR_OFF,
@@ -48,42 +59,48 @@ struct adsr_state {
         ADSR_SUSTAIN,
         ADSR_RELEASE,
     } mode;
-    uint8_t a_incr;
-    uint8_t d_decr;
-    uint8_t s;
-    uint8_t r_decr;
-    uint8_t output;
+    int8_t initial_value;
+    int8_t a_incr;
+    int8_t a_value;
+    int8_t d_incr;
+    int8_t s_value;
+    int8_t r_incr;
+    int8_t final_value;
+    int8_t output;
     uint8_t last_gate;
 };
 
 static struct adsr_state amp_env;
 static struct triangle_state amp_lfo;
 
-static void adsr_init(struct adsr_state *state, uint8_t a, uint8_t d, uint8_t s, uint8_t r) {
+static void adsr_init(struct adsr_state *state, int8_t initial_value, int8_t a_time, int8_t a_value, int8_t d_time, int8_t s_value, int8_t r_time, int8_t final_value) {
     state->mode = ADSR_OFF;
-    if (a == 0) {
-        a = 1;
+    state->initial_value = initial_value;
+    if (a_time <= 0) {
+        a_time = 1;
     }
-    state->a_incr = 255 / a;
+    state->a_incr = ((int16_t)a_value - initial_value) / a_time;
     if (state->a_incr == 0) {
-        state->a_incr = 1;
+        state->a_incr = a_value > initial_value ? 1 : -1;
     }
-    if (d == 0) {
-        d = 1;
+    state->a_value = a_value;
+    if (d_time <= 0) {
+        d_time = 1;
     }
-    state->d_decr = (255 - s) / d;
-    if (state->d_decr == 0) {
-        state->d_decr = 1;
+    state->d_incr = ((int16_t)s_value - a_value) / d_time;
+    if (state->d_incr == 0) {
+        state->a_incr = s_value > a_value ? 1 : -1;
     }
-    state->s = s;
-    if (r == 0) {
-        r = 1;
+    state->s_value = s_value;
+    if (r_time <= 0) {
+        r_time = 1;
     }
-    state->r_decr = s / r;
-    if (state->r_decr == 0) {
-        state->r_decr = 1;
+    state->r_incr = ((int16_t)final_value - s_value) / r_time;
+    if (state->r_incr == 0) {
+        state->r_incr = final_value > s_value ? 1 : -1;
     }
-    state->output = 0;
+    state->final_value = final_value;
+    state->output = final_value;
     state->last_gate = 0;
 }
 
@@ -99,27 +116,30 @@ static uint8_t adsr_update(struct adsr_state *state, uint8_t gate) {
         case ADSR_SUSTAIN:
             break;
         case ADSR_ATTACK:
-            if (state->output >= 255 - state->a_incr) {
-                state->output = 255;
+            if ((state->a_incr > 0 && state->output >= state->a_value - state->a_incr)
+             || (state->a_incr < 0 && state->output <= state->a_value - state->a_incr)) {
+                state->output = state->a_value;
                 state->mode = ADSR_DECAY;
             } else {
                 state->output += state->a_incr;
             }
             break;
         case ADSR_DECAY:
-            if (state->output <= state->s + state->d_decr) {
-                state->output = state->s;
+            if ((state->d_incr > 0 && state->output >= state->s_value - state->d_incr)
+             || (state->d_incr < 0 && state->output <= state->s_value - state->d_incr)) {
+                state->output = state->s_value;
                 state->mode = ADSR_SUSTAIN;
             } else {
-                state->output -= state->d_decr;
+                state->output += state->d_incr;
             }
             break;
         case ADSR_RELEASE:
-            if (state->output <= state->r_decr) {
-                state->output = 0;
+            if ((state->r_incr > 0 && state->output >= state->final_value - state->r_incr)
+             || (state->r_incr < 0 && state->output <= state->final_value - state->r_incr)) {
+                state->output = state->final_value;
                 state->mode = ADSR_OFF;
             } else {
-                state->output -= state->r_decr;
+                state->output += state->r_incr;
             }
             break;
     }
@@ -342,7 +362,7 @@ main (void)
     // Set audio interrupt at higher priority
     CPUINT.LVL1VEC = TCA0_OVF_vect_num;
 
-    adsr_init(&amp_env, 1, 20, 200, 255);
+    adsr_init(&amp_env, 0, 1, 127, 20, 100, 127, 0);
     //adsr_init(&amp_env, 1, 255, 127, 255);
     triangle_init(&amp_lfo, -30, 30, 127);
 
@@ -454,16 +474,15 @@ ISR (TCB0_INT_vect)
 
     if (decay_counter > velocity_change_rate) {
         //real_velocity = ((uint16_t)adsr_update(&amp_env, triggered_velocity > 0 ? triggered_note + 1 : 0) * triggered_velocity) >> 8;
-        uint8_t vel = adsr_update(&amp_env, triggered_velocity > 0 ? triggered_note + 1 : 0);
-        int8_t vel_lfo = triangle_update(&amp_lfo);
-        if ((int16_t)vel + vel_lfo < 0 || vel == 0) {
+        int8_t vel = adsr_update(&amp_env, triggered_velocity > 0 ? triggered_note + 1 : 0);
+        //if (vel > 0) {
+        //    int8_t vel_lfo = triangle_update(&amp_lfo);
+        //    vel = sadd(vel, vel_lfo);
+        //}
+        if (vel < 0) {
             vel = 0;
-        } else if ((int16_t)vel + vel_lfo > 255) {
-            vel = 255;
-        } else {
-            vel += vel_lfo;
         }
-        real_velocity = vel;
+        real_velocity = vel * 2;
         decay_counter = 0;
     }
     decay_counter++;
