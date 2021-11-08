@@ -6,12 +6,6 @@
 
 #define MIDI_CHANNEL 0
 
-//const uint16_t PERIOD_LKUP[] = {
-//30337, 28635, 27027, 25511, 24079, 22727, 21452, 20248, 19111, 18039, 17026, 16071, 15169, 14317, 13514, 12755, 12039, 11364, 10726, 10124, 9556, 9019, 8513, 8035, 7584, 7159, 6757, 6378, 6020, 5682, 5363, 5062, 4778, 4510, 4257, 4018, 3792, 3579, 3378, 3189, 3010, 2841, 2681, 2531, 2389, 2255, 2128, 2009, 1896, 1790, 1689, 1594, 1505, 1420, 1341, 1265, 1194, 1127, 1064, 1004, 948, 895, 845, 797, 752, 710, 670, 633, 597, 564, 532, 1004, 948, 895, 845, 797, 752, 710, 670, 633, 597, 564, 532, 1004, 948, 895, 845, 797, 752, 710, 670, 633, 597, 564, 532, 1004, 948, 895, 845, 797, 752, 710, 670, 633, 597, 564, 532, 1004, 948, 895, 845, 797, 752, 710, 670, 633, 597, 564, 532, 1004, 948, 895, 845, 797, 752, 710, 670, 633, 597, 564, 532, 1004, 948, 895, 845, 797, 752, 710, 670, 633, 597, 564, 532, 1004, 948, 895, 845, 797, 752, 710, 670, 633, 597, 564, 532, 1004, 948, 895, 845, 797, 752, 710, 670, 633, 597, 564, 532, 1004, 948, 895, 845, 797, 752, 710, 670, 633, 597, 564, 532, 1004, 948, 895, 845, 797, 752, 710, 670, 633, 597, 564, 532, 1004, 948, 895, 845, 797, 752, 710, 670, 633, 597, 564, 532, 1004, 948, 895, 845, 797, 752, 710, 670, 633, 597, 564, 532, 1004, 948, 895, 845, 797, 752, 710, 670, 633, 597, 564, 532, 1004, 948, 895, 845, 797, 752, 710, 670, 633, 597, 564, 532, 1004, 948, 895, 845, 797, 752, 710, 670, 633, 597, 564, 532, 502, 474, 447, 422, 399, };
-
-//const uint8_t INCREMENT_BITS_LKUP[] = {
-//0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, };
-
 // This lkup uses 16 counts per period
 const uint16_t PERIOD_LKUP[] = {
 38223, 36077, 34052, 32141, 30337, 28635, 27027, 25511, 24079, 22727, 21452, 20248, 19111, 18039, 17026, 16071, 15169, 14317, 13514, 12755, 12039, 11364, 10726, 10124, 9556, 9019, 8513, 8035, 7584, 7159, 6757, 6378, 6020, 5682, 5363, 5062, 4778, 4510, 4257, 4018, 3792, 3579, 3378, 3189, 3010, 2841, 2681, 2531, 2389, 2255, 2128, 2009, 1896, 1790, 1689, 1594, 1505, 1420, 1341, 1265, 1194, 1127, 1064, 1004, 948, 895, 845, 797, 752, 710, 670, 633, 597, 564, 532, 502, 474, 447, 422, 399, 376, 355, 335, 316, 299, 282, 266, 251, 237, 224, 211, 199, 188, 178, 168, 158, 149, 141, 133, 126, 119, 112, 106, 100, 94, 89, 84, 79, 75, 70, 67, 63, 59, 56, 53, 50, 47, 44, 42, 40, 37, 35, 33, 31, 30, 28, 26, };
@@ -30,15 +24,15 @@ static uint8_t note_velocity[MAX_NOTES];
 static uint8_t triggered_note;
 static uint8_t triggered_velocity;
 static uint16_t target_velocity;
-static uint16_t velocity_change_rate = 10;
+static uint16_t velocity_change_rate = 30;
 static uint8_t real_velocity;
 
 static uint16_t arp_counter;
 static uint8_t arp_index;
 static uint16_t decay_counter;
 
-static uint16_t frac_note;
-static uint8_t frac_note_counter;
+static int16_t bend;
+//static uint8_t frac_note_counter;
 
 static int8_t sadd(int8_t x, int8_t y) {
     int16_t result = x + y;
@@ -72,6 +66,9 @@ struct adsr_state {
 
 static struct adsr_state amp_env;
 static struct triangle_state amp_lfo;
+static struct adsr_state pitch_env;
+static struct triangle_state pitch_lfo;
+static struct adsr_state pitch_lfo_env;
 
 static void adsr_init(struct adsr_state *state, int8_t initial_value, int8_t a_time, int8_t a_value, int8_t d_time, int8_t s_value, int8_t r_time, int8_t final_value) {
     state->mode = ADSR_OFF;
@@ -89,7 +86,7 @@ static void adsr_init(struct adsr_state *state, int8_t initial_value, int8_t a_t
     }
     state->d_incr = ((int16_t)s_value - a_value) / d_time;
     if (state->d_incr == 0) {
-        state->a_incr = s_value > a_value ? 1 : -1;
+        state->d_incr = s_value > a_value ? 1 : -1;
     }
     state->s_value = s_value;
     if (r_time <= 0) {
@@ -106,8 +103,9 @@ static void adsr_init(struct adsr_state *state, int8_t initial_value, int8_t a_t
 
 static uint8_t adsr_update(struct adsr_state *state, uint8_t gate) {
     if ((state->mode == ADSR_OFF || state->mode == ADSR_RELEASE || gate != state->last_gate) && gate) {
+        state->output = state->initial_value;
         state->mode = ADSR_ATTACK;
-    } else if (state->output > 0 && !gate) {
+    } else if (!gate) {
         state->mode = ADSR_RELEASE;
     }
     state->last_gate = gate;
@@ -362,9 +360,13 @@ main (void)
     // Set audio interrupt at higher priority
     CPUINT.LVL1VEC = TCA0_OVF_vect_num;
 
-    adsr_init(&amp_env, 0, 1, 127, 20, 100, 127, 0);
+    adsr_init(&amp_env, 0, 1, 127, 20, 100, 32, 0);
     //adsr_init(&amp_env, 1, 255, 127, 255);
-    triangle_init(&amp_lfo, -30, 30, 127);
+    triangle_init(&amp_lfo, -100, 100, 30);
+
+    adsr_init(&pitch_env, 0, 1, 0, 1, 0, 100, -127);
+    triangle_init(&pitch_lfo, -30, 30, 50);
+    adsr_init(&pitch_lfo_env, 0, 30, 10, 1, 10, 10, 127);
 
     sei();
     //uint8_t a = 0;
@@ -372,72 +374,11 @@ main (void)
     uint8_t last_a = 0;
 
     for(;;);
-
-    //while(1) 
-    //{
-    //    ADC0.MUXPOS &= ~ADC_MUXPOS_AIN4_gc;
-    //    ADC0.MUXPOS |= ADC_MUXPOS_AIN2_gc; // Read from PA2
-    //    ADC0.COMMAND |= ADC_STCONV_bm;
-    //    while (ADC0.COMMAND & ADC_STCONV_bm);
-    //    uint8_t knob = ADC0.RES >> 2;
-    //    ADC0.MUXPOS &= ~ADC_MUXPOS_AIN2_gc;
-    //    ADC0.MUXPOS |= ADC_MUXPOS_AIN4_gc; // Read from PA4
-    //    ADC0.COMMAND |= ADC_STCONV_bm;
-    //    while (ADC0.COMMAND & ADC_STCONV_bm);
-    //    uint8_t inp = ADC0.RES >> 2;
-
-    //    //uint8_t a = t*((t>>12 | t>>8)&63&t>>4);
-    //    //uint8_t a = (t*5&t>>7)|(t*3&t>>10);
-    //    //uint8_t a = t << 3;
-    //    //uint8_t a = (t * 9 & t >> 4 | t * 5 & t >> 7 | t * 30 & t / 1024) - 1;
-    //    //DAC0.DATA = inp & knob;
-
-    //    if (knob > 127) {
-    //        // Square
-    //        uint8_t t_byte = (uint8_t)(t >> 8);
-    //        DAC0.DATA = t_byte > knob ? velocity << 1 : 0;
-    //    } else {
-    //        // Saw
-    //        uint8_t t_byte = (uint8_t)(t >> 8);
-    //        uint8_t saw = t_byte < (knob << 1) ? t_byte : 0;
-    //        DAC0.DATA = velocity ? saw : 0;
-    //    }
-
-    //    //DAC0.DATA = t >> 4;
-    //    t += increment;
-    //    if (knob == 0) t = 0;
-    //    while (!(TCA0.SINGLE.INTFLAGS & TCA_SINGLE_OVF_bm));
-    //    TCA0.SINGLE.INTFLAGS |= TCA_SINGLE_OVF_bm;
-    //}
 }
 
 // Update modulation
 ISR (TCB0_INT_vect)
 {
-    //// Find last held note
-    //if (note_velocity[i] != 0) {
-    //    break;
-    //}
-    //new_velocity = note_velocity[i];
-    //new_note = note_index[i];
-
-    //if (new_velocity > 0 && (new_velocity != velocity || new_note != note)) {
-    //    // Note on!
-    //    note = new_note;
-    //    velocity = new_velocity;
-
-    //    // New note this frame
-    //    t = 0;
-    //    decay_counter = 0;
-
-    //    TCA0.SINGLE.CNT = 0;
-    //    PORTA.OUT |= 1 << 1;
-    //} else if (new_velocity == 0 && velocity > 0) {
-    //    // Note off!
-    //    velocity = 0;
-    //    PORTA.OUT &= ~(1 << 1);
-    //}
-
     ADC0.MUXPOS &= ~ADC_MUXPOS_AIN4_gc;
     ADC0.MUXPOS |= ADC_MUXPOS_AIN2_gc; // Read from PA2
     ADC0.COMMAND |= ADC_STCONV_bm;
@@ -451,7 +392,6 @@ ISR (TCB0_INT_vect)
         note_playing = 1;
         arp_index = 0;
         arp_counter = ~0;
-        frac_note = 0;
     }
 
     if (arp_counter > (knob << 3)) {
@@ -463,22 +403,24 @@ ISR (TCB0_INT_vect)
     }
     arp_counter++;
 
-    if (frac_note < (30 << 8) && frac_note_counter > 4) {
-        frac_note++;
-        frac_note_counter = 0;
-    }
-    frac_note_counter++;
-
     triggered_note = note_index[arp_index];
     triggered_velocity = note_velocity[arp_index];
 
     if (decay_counter > velocity_change_rate) {
         //real_velocity = ((uint16_t)adsr_update(&amp_env, triggered_velocity > 0 ? triggered_note + 1 : 0) * triggered_velocity) >> 8;
-        int8_t vel = adsr_update(&amp_env, triggered_velocity > 0 ? triggered_note + 1 : 0);
-        //if (vel > 0) {
-        //    int8_t vel_lfo = triangle_update(&amp_lfo);
-        //    vel = sadd(vel, vel_lfo);
-        //}
+        uint8_t note_gate = triggered_velocity > 0 ? triggered_note + 1 : 0;
+        uint8_t smooth_gate = triggered_velocity > 0 ? 1 : 0;
+        int8_t vel = adsr_update(&amp_env, note_gate);
+        int8_t pitch_env_value = adsr_update(&pitch_env, smooth_gate);
+        int8_t pitch_lfo_value = triangle_update(&pitch_lfo);
+        int8_t pitch_lfo_env_value = adsr_update(&pitch_lfo_env, smooth_gate);
+        pitch_lfo_value = ((int16_t)pitch_lfo_value * pitch_lfo_env_value) >> 7;
+
+        bend = ((int16_t)pitch_env_value << 4) + ((int16_t)pitch_lfo_value << 4);
+        if (vel > 0) {
+            int8_t vel_lfo = triangle_update(&amp_lfo) >> 4;
+            vel = sadd(vel, vel_lfo);
+        }
         if (vel < 0) {
             vel = 0;
         }
@@ -487,25 +429,6 @@ ISR (TCB0_INT_vect)
     }
     decay_counter++;
 
-    //if (triggered_velocity > 0) {
-    //    target_velocity = triggered_velocity + 128; // Only use upper half of volume range
-    //    velocity_change_rate = 10;
-    //} else {
-    //    target_velocity = 0;
-    //    velocity_change_rate = 10;
-    //}
-
-    //if (real_velocity != target_velocity) {
-    //    if (decay_counter > velocity_change_rate) {
-    //        //int16_t error = (int16_t)target_velocity - real_velocity;
-    //        //error = (error * 255) / 256;
-    //        //real_velocity = (int16_t)target_velocity - error;
-    //        if(real_velocity < target_velocity) real_velocity++;
-    //        if(real_velocity > target_velocity) real_velocity--;
-    //        decay_counter = 0;
-    //    }
-    //    decay_counter++;
-    //}
     note_playing = real_velocity > 0;
 
     if (note_playing) {
@@ -516,56 +439,45 @@ ISR (TCB0_INT_vect)
     TCB0.INTFLAGS |= TCB_CAPT_bm;
 }
 
+static uint16_t period(int16_t note) {
+    // Set osc as per new note
+    if (note < 0) { // Highest note to avoid deadlock
+        note = 0;
+    }
+    if (note > (100 << 8)) { // Highest note to avoid deadlock
+        note = (100 << 8);
+    }
+    uint8_t ix = note >> 8;
+    uint16_t per_low = PERIOD_LKUP[ix];
+    uint16_t per_high = PERIOD_LKUP[ix + 1];
+    uint8_t frac = note & 0xFF;
+    uint16_t per = ((uint32_t)per_low * (256 - frac) + (uint32_t)per_high * frac) >> 8;
+    return per;
+}
+
 // Update DAC
 ISR (TCA0_OVF_vect) 
 {
     static uint8_t last_note;
     static uint8_t last_velocity;
 
-    //ADC0.MUXPOS &= ~ADC_MUXPOS_AIN2_gc;
-    //ADC0.MUXPOS |= ADC_MUXPOS_AIN4_gc; // Read from PA4
-    //ADC0.COMMAND |= ADC_STCONV_bm;
-    //while (ADC0.COMMAND & ADC_STCONV_bm);
-    //uint8_t inp = ADC0.RES >> 2;
-
-    //uint8_t a = t*((t>>12 | t>>8)&63&t>>4);
-    //uint8_t a = (t*5&t>>7)|(t*3&t>>10);
-    //uint8_t a = t << 3;
-    //uint8_t a = (t * 9 & t >> 4 | t * 5 & t >> 7 | t * 30 & t / 1024) - 1;
-    //DAC0.DATA = inp & knob;
-
-
     // Square
     #define T_PERIOD_BM 0xF
     #define T_PERIOD_BITS 4
 
     uint8_t t_byte = (uint8_t)(t & T_PERIOD_BM);
-    DAC0.DATA = t_byte > 0 ? 0 : last_velocity;
-    //DAC0.DATA = (t_byte * last_velocity) >> 8;
-    //} else {
-    //    // Saw
-    //    uint8_t t_byte = (uint8_t)(t >> 8);
-    //    uint8_t saw = t_byte < (knob << 1) ? t_byte : 0;
-    //    DAC0.DATA = velocity ? saw : 0;
-    //}
+    t_byte = t_byte > 0 ? 0 : 255;
 
-    //DAC0.DATA = t >> 4;
+    //uint8_t t_byte = t * 5 | (t * 3 & 0x3F);
+
+    //DAC0.DATA = t_byte > 32 ? 0 : last_velocity;
+
+    DAC0.DATA = ((uint16_t)t_byte * last_velocity) >> 8;
+
     t++;
-    //if (knob == 0) t = 0;
 
     if ((t & T_PERIOD_BM) == 0) {
-        // Set osc as per new note
-        frac_note = 0;
-        uint8_t ix = triggered_note + (frac_note >> 8);
-        if (ix > 100) { // Highest note to avoid deadlock
-            ix = 100;
-        }
-        uint16_t per_low = PERIOD_LKUP[ix];
-        uint16_t per_high = PERIOD_LKUP[ix + 1];
-        uint8_t frac = frac_note & 0xFF;
-        //frac = 0;
-        uint16_t per = ((uint32_t)per_low * (256 - frac) + (uint32_t)per_high * frac) >> 8;
-        TCA0.SINGLE.PER = per;
+        TCA0.SINGLE.PER = period(((int16_t)triggered_note << 8) + bend);
         last_note = triggered_note;
         last_velocity = real_velocity;
     }
