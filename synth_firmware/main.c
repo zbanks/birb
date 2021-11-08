@@ -30,6 +30,7 @@ static uint8_t real_velocity;
 static uint16_t arp_counter;
 static uint8_t arp_index;
 static uint16_t decay_counter;
+//static uint16_t mod_counter;
 
 static int16_t bend;
 //static uint8_t frac_note_counter;
@@ -66,9 +67,14 @@ struct adsr_state {
 
 static struct adsr_state amp_env;
 static struct triangle_state amp_lfo;
-static struct adsr_state pitch_env;
+//static struct adsr_state pitch_env;
 static struct triangle_state pitch_lfo;
 static struct adsr_state pitch_lfo_env;
+static struct adsr_state mod_env;
+static struct triangle_state mod_lfo;
+
+static int8_t mod_env_value;
+static int8_t mod_lfo_value;
 
 static void adsr_init(struct adsr_state *state, int8_t initial_value, int8_t a_time, int8_t a_value, int8_t d_time, int8_t s_value, int8_t r_time, int8_t final_value) {
     state->mode = ADSR_OFF;
@@ -362,11 +368,15 @@ main (void)
 
     adsr_init(&amp_env, 0, 1, 127, 20, 100, 32, 0);
     //adsr_init(&amp_env, 1, 255, 127, 255);
-    triangle_init(&amp_lfo, -100, 100, 30);
+    //triangle_init(&amp_lfo, -100, 100, 30);
 
-    adsr_init(&pitch_env, 0, 1, 0, 1, 0, 100, -127);
-    triangle_init(&pitch_lfo, -30, 30, 50);
-    adsr_init(&pitch_lfo_env, 0, 30, 10, 1, 10, 10, 127);
+    //adsr_init(&pitch_env, 0, 1, 0, 1, 0, 100, -127);
+    triangle_init(&pitch_lfo, -60, 60, 30);
+    adsr_init(&pitch_lfo_env, 0, 100, 100, 1, 100, 1, 100);
+
+    adsr_init(&mod_env, 127, 100, 64 + 32, 1, 64 + 32, 100, 127);
+    triangle_init(&mod_lfo, 0x3F, 0x7F, 10);
+    triangle_init(&mod_lfo, 0, 0, 10); // XXX
 
     sei();
     //uint8_t a = 0;
@@ -392,6 +402,7 @@ ISR (TCB0_INT_vect)
         note_playing = 1;
         arp_index = 0;
         arp_counter = ~0;
+        //mod_counter = 0;
     }
 
     if (arp_counter > (knob << 3)) {
@@ -411,16 +422,20 @@ ISR (TCB0_INT_vect)
         uint8_t note_gate = triggered_velocity > 0 ? triggered_note + 1 : 0;
         uint8_t smooth_gate = triggered_velocity > 0 ? 1 : 0;
         int8_t vel = adsr_update(&amp_env, note_gate);
-        int8_t pitch_env_value = adsr_update(&pitch_env, smooth_gate);
+        //int8_t pitch_env_value = adsr_update(&pitch_env, smooth_gate);
         int8_t pitch_lfo_value = triangle_update(&pitch_lfo);
         int8_t pitch_lfo_env_value = adsr_update(&pitch_lfo_env, smooth_gate);
-        pitch_lfo_value = ((int16_t)pitch_lfo_value * pitch_lfo_env_value) >> 7;
+        pitch_lfo_value = ((int16_t)pitch_lfo_value * pitch_lfo_env_value) >> 12;
 
-        bend = ((int16_t)pitch_env_value << 4) + ((int16_t)pitch_lfo_value << 4);
-        if (vel > 0) {
-            int8_t vel_lfo = triangle_update(&amp_lfo) >> 4;
-            vel = sadd(vel, vel_lfo);
-        }
+        mod_env_value = adsr_update(&mod_env, note_gate);
+        mod_lfo_value = triangle_update(&mod_lfo);
+
+        bend = ((int16_t)pitch_lfo_value << 4);
+        //bend += ((int16_t)pitch_env_value << 4);
+        //if (vel > 0) {
+            //int8_t vel_lfo = triangle_update(&amp_lfo) >> 4;
+            //vel = sadd(vel, vel_lfo);
+        //}
         if (vel < 0) {
             vel = 0;
         }
@@ -428,6 +443,8 @@ ISR (TCB0_INT_vect)
         decay_counter = 0;
     }
     decay_counter++;
+
+    //mod_counter++;
 
     note_playing = real_velocity > 0;
 
@@ -460,13 +477,22 @@ ISR (TCA0_OVF_vect)
 {
     static uint8_t last_note;
     static uint8_t last_velocity;
+    static uint8_t last_mod;
 
     // Square
-    #define T_PERIOD_BM 0xF
-    #define T_PERIOD_BITS 4
+    #define T_PERIOD_BITS 6
+    #define T_PERIOD_BM ((1 << T_PERIOD_BITS) - 1)
 
-    uint8_t t_byte = (uint8_t)(t & T_PERIOD_BM);
-    t_byte = t_byte > 0 ? 0 : 255;
+    //uint8_t t_byte = (uint8_t)(t & T_PERIOD_BM);
+    //t_byte = t_byte > 0 ? 0 : 255;
+    //uint8_t t_byte = (t & 0xF) == 0 ? 255 : 0;
+
+    uint16_t t1 = t * 3;
+    uint16_t t2 = t * 2;
+
+    uint8_t t_byte = ((t1 | t2) & T_PERIOD_BM) << (8 - T_PERIOD_BITS);
+
+    t_byte &= last_mod;
 
     //uint8_t t_byte = t * 5 | (t * 3 & 0x3F);
 
@@ -480,6 +506,7 @@ ISR (TCA0_OVF_vect)
         TCA0.SINGLE.PER = period(((int16_t)triggered_note << 8) + bend);
         last_note = triggered_note;
         last_velocity = real_velocity;
+        last_mod = ((uint8_t)mod_lfo_value << 1) | ((uint8_t)mod_env_value << 1);
     }
     TCA0.SINGLE.INTFLAGS |= TCA_SINGLE_OVF_bm;
 }
