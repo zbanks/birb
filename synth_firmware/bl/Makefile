@@ -12,20 +12,19 @@ OBJECTS = $(patsubst %.c,%.o,$(C_SRC))
 # Assembler, compiler, and linker flags
 CFLAGS = -B /home/eric/avr-test/sandbox/gcc/ -mmcu=attiny1614 -Wall -Os -ggdb3
 #CFLAGS += -fdata-sections -ffunction-sections
-LFLAGS = $(CFLAGS) -Wl,-Map=main.map -Wl,--defsym -Wl,__TEXT_REGION_ORIGIN__=0x1000
+LFLAGS = $(CFLAGS) -Wl,-Map=bl.map
+LFLAGS += -Wl,--defsym -Wl,__TEXT_REGION_LENGTH__=0x1000
 LIBRARIES =
 
 # Targets
-all: main.elf main.bin
+all: bl.elf
 clean:
 	-rm -f $(OBJECTS) *.elf *.bin *.map *.hex
-main.hex: main.elf
-	$(OBJCOPY) -O ihex main.elf main.hex
-main.bin: main.elf
-	$(OBJCOPY) -O binary main.elf main.bin
-main.elf: $(OBJECTS)
-	$(LD) $(LFLAGS) -o main.elf $(OBJECTS) $(LIBRARIES)
+#bl.hex: bl.elf
+#	$(OBJCOPY) -O ihex bl.elf bl.hex
+bl.elf: $(OBJECTS)
+	$(LD) $(LFLAGS) -o bl.elf $(OBJECTS) $(LIBRARIES)
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
-flash: main.elf
-	avrdude -c jtag2updi -p t1614 -P /dev/ttyACM0 -U flash:w:main.elf
+flash: bl.elf
+	avrdude -c jtag2updi -p t1614 -P /dev/ttyACM0 -U fuse8:w:bl.elf -U flash:w:bl.elf

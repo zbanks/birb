@@ -208,7 +208,11 @@ static void rx(uint8_t byte) {
     static uint8_t k;
     static uint8_t v;
 
-    if ((byte & 0xF8) == 0xF8) {
+    if (byte == 0xFF) {
+        // "Reset" message: Issue system reset
+        _PROTECTED_WRITE(RSTCTRL.SWRR, RSTCTRL_SWRE_bm);
+        for(;;);
+    } else if ((byte & 0xF8) == 0xF8) {
         return; // Ignore real-time messages
     }
 
@@ -306,6 +310,16 @@ main (void)
     CLKCTRL.MCLKCTRLA |= CLKCTRL_CLKSEL_EXTCLK_gc;
     CCP = CCP_IOREG_gc;
     CLKCTRL.MCLKCTRLB &= ~CLKCTRL_PEN_bm;
+
+//BREAK
+
+//    PORTA.DIRSET = 1 << 1; // Set PA1 as output
+//    for (;;) {
+//        PORTA.OUT ^= 1 << 1;
+//        _delay_ms(500);
+//    }
+
+//BREAK
 
     // Set up audio-frequency timer
 
