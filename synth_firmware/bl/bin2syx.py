@@ -30,10 +30,14 @@ def reset_into_bl():
 def reset_into_app():
     return b"\xFF"
 
+if len(sys.argv) < 2:
+    print("usage: bin2syx.py [INPUT BIN FILE] [OUTPUT SYX FILE]", file=sys.stderr)
+    sys.exit(1)
+
 with open(sys.argv[1], "rb") as f:
     b = f.read()
 
-sysex_data = reset_into_bl() + write_flash(0x9000, b) + reset_into_app()
+sysex_data = reset_into_bl() + write_flash(0x8800, b) + reset_into_app()
 
-with open("app.syx", "wb") as f:
+with open(sys.argv[2], "wb") as f:
     f.write(sysex_data)

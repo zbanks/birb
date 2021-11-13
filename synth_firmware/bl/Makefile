@@ -11,7 +11,8 @@ OBJECTS = $(patsubst %.c,%.o,$(C_SRC))
 
 # Assembler, compiler, and linker flags
 CFLAGS = -B /home/eric/avr-test/sandbox/gcc/ -mmcu=attiny1614 -Wall -Os -ggdb3
-#CFLAGS += -fdata-sections -ffunction-sections
+CFLAGS += -fdata-sections -ffunction-sections
+CFLAGS += -Wall -Wextra -Werror
 LFLAGS = $(CFLAGS) -Wl,-Map=bl.map
 LFLAGS += -Wl,--defsym -Wl,__TEXT_REGION_LENGTH__=0x1000
 LIBRARIES =
@@ -20,8 +21,10 @@ LIBRARIES =
 all: bl.elf
 clean:
 	-rm -f $(OBJECTS) *.elf *.bin *.map *.hex
-#bl.hex: bl.elf
-#	$(OBJCOPY) -O ihex bl.elf bl.hex
+bl.hex: bl.elf
+	$(OBJCOPY) -O ihex bl.elf bl.hex
+bl.bin: bl.elf
+	$(OBJCOPY) -O binary -R .fuse bl.elf bl.bin
 bl.elf: $(OBJECTS)
 	$(LD) $(LFLAGS) -o bl.elf $(OBJECTS) $(LIBRARIES)
 %.o: %.c

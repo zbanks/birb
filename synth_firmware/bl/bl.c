@@ -4,7 +4,7 @@
 #include <avr/interrupt.h>
 #include <util/delay.h>
 
-#define BOOTEND_FUSE 0x10 // How many 256-byte pages the BL takes (0x10 = 4KB)
+#define BOOTEND_FUSE 0x08 // How many 256-byte pages the BL takes (0x08 = 2KB)
 #define APP_START (BOOTEND_FUSE * 256) // Memory address of application, in bytes
 
 typedef __attribute__((noreturn)) void (*const app_t)(void);

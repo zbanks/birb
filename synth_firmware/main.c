@@ -158,7 +158,7 @@ struct triangle_state {
     int8_t output;
 };
 
-static int8_t triangle_init(struct triangle_state *state, int8_t low, int8_t high, int8_t period) {
+static void triangle_init(struct triangle_state *state, int8_t low, int8_t high, int8_t period) {
     state->low = low;
     state->high = high;
     if (period == 0) {
