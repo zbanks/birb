@@ -18,6 +18,8 @@ def noop(length):
     return b"\xF0\x7D\x61\x27\x00" + b"\x00" * (length - 5) + b"\xF7"
 
 def write_flash_page(addr, b):
+    assert len(b) <= 64
+    b = b + b"\xFF" * (64 - len(b))
     write_command = b"\xF0\x7D\x61\x26\x01" + encode_addr(addr) + encode_bytes(b) + b"\xF7"
     return write_command + noop(20) # 20 bytes > 4 ms (flash write time)
 
