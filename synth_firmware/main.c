@@ -158,6 +158,7 @@ struct triangle_state {
     int8_t high;
     int8_t increment;
     int8_t output;
+    uint8_t last_gate;
 };
 
 static void triangle_init(struct triangle_state *state, int8_t low, int8_t high, int8_t period) {
@@ -170,26 +171,33 @@ static void triangle_init(struct triangle_state *state, int8_t low, int8_t high,
     if (state->increment == 0) {
         state->increment = 1;
     }
-    state->output = (low + high) >> 1;
+    state->output = low;
     state->up = 1;
+    state->last_gate = 0;
 }
 
-static int8_t triangle_update(struct triangle_state *state) {
-    if (state->up) {
-        if (state->output > state->high - state->increment) {
-            state->output = state->high;
-            state->up = 0;
-        } else {
-            state->output += state->increment;
-        }
+static int8_t triangle_update(struct triangle_state *state, uint8_t gate) {
+    if (gate && gate != state->last_gate) {
+        state->output = state->low;
+        state->up = 1;
     } else {
-        if (state->output < state->low + state->increment) {
-            state->output = state->low;
-            state->up = 1;
+        if (state->up) {
+            if (state->output > state->high - state->increment) {
+                state->output = state->high;
+                state->up = 0;
+            } else {
+                state->output += state->increment;
+            }
         } else {
-            state->output -= state->increment;
+            if (state->output < state->low + state->increment) {
+                state->output = state->low;
+                state->up = 1;
+            } else {
+                state->output -= state->increment;
+            }
         }
     }
+    state->last_gate = gate;
     return state->output;
 }
 
@@ -406,8 +414,8 @@ main (void)
     adsr_init(&pitch_lfo_env, 0, 100, 100, 1, 100, 1, 100);
 
     adsr_init(&mod_env, 127, 100, 64 + 32, 1, 64 + 32, 100, 127);
-    triangle_init(&mod_lfo, 0x3F, 0x7F, 10);
-    triangle_init(&mod_lfo, 0, 0, 10); // XXX
+    triangle_init(&mod_lfo, 0x00, 0x00, 0);
+    //triangle_init(&mod_lfo, 0, 0, 10); // XXX
 
     sei();
     //uint8_t a = 0;
@@ -454,12 +462,12 @@ ISR (TCB0_INT_vect)
         uint8_t smooth_gate = triggered_velocity > 0 ? 1 : 0;
         int8_t vel = adsr_update(&amp_env, note_gate);
         //int8_t pitch_env_value = adsr_update(&pitch_env, smooth_gate);
-        int8_t pitch_lfo_value = triangle_update(&pitch_lfo);
+        int8_t pitch_lfo_value = triangle_update(&pitch_lfo, note_gate);
         int8_t pitch_lfo_env_value = adsr_update(&pitch_lfo_env, smooth_gate);
         pitch_lfo_value = ((int16_t)pitch_lfo_value * pitch_lfo_env_value) >> 12;
 
         mod_env_value = adsr_update(&mod_env, note_gate);
-        mod_lfo_value = triangle_update(&mod_lfo);
+        mod_lfo_value = triangle_update(&mod_lfo, note_gate);
 
         bend = ((int16_t)pitch_lfo_value << 4);
         //bend += ((int16_t)pitch_env_value << 4);
@@ -523,8 +531,8 @@ ISR (TCA0_OVF_vect)
 
     uint8_t t_byte = ((t1 | t2) & T_PERIOD_BM) << (8 - T_PERIOD_BITS);
 
-    //t_byte &= last_mod;
     t_byte &= 0x80 | mod;
+    //t_byte &= 0x80 | mod;
 
     //uint8_t t_byte = t * 5 | (t * 3 & 0x3F);
 
@@ -538,7 +546,9 @@ ISR (TCA0_OVF_vect)
         TCA0.SINGLE.PER = period(((int16_t)triggered_note << 8) + bend);
         last_note = triggered_note;
         last_velocity = real_velocity;
-        last_mod = ((uint8_t)mod_lfo_value << 1) | ((uint8_t)mod_env_value << 1);
+        //mod_lfo.high = mod;
+        //mod_lfo.increment = 1 | (mod >> 5);
+        last_mod = ((uint8_t)mod_lfo_value); // | ((uint8_t)mod_env_value << 1);
     }
     TCA0.SINGLE.INTFLAGS |= TCA_SINGLE_OVF_bm;
 }
