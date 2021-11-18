@@ -35,6 +35,8 @@ static uint16_t decay_counter;
 static int16_t bend;
 //static uint8_t frac_note_counter;
 
+static uint8_t mod = 0;
+
 static int8_t sadd(int8_t x, int8_t y) {
     int16_t result = x + y;
     if (result > 127) {
@@ -203,6 +205,8 @@ static void rx(uint8_t byte) {
         WAIT_NOTE_ON_VELOCITY,
         WAIT_NOTE_OFF_KEY,
         WAIT_NOTE_OFF_VELOCITY,
+        WAIT_CC_CONTROL,
+        WAIT_MOD_VALUE,
     } state = UNKNOWN;
 
     static uint8_t k;
@@ -222,6 +226,8 @@ static void rx(uint8_t byte) {
             state = WAIT_NOTE_OFF_KEY;
         } else if (byte == (0x90 | MIDI_CHANNEL)) {
             state = WAIT_NOTE_ON_KEY;
+        } else if (byte == (0xB0 | MIDI_CHANNEL)) {
+            state = WAIT_CC_CONTROL;
         } else {
             state = UNKNOWN;
         }
@@ -247,6 +253,17 @@ static void rx(uint8_t byte) {
                 v = byte;
                 note_off(k);
                 state = WAIT_NOTE_OFF_KEY;
+                break;
+            case WAIT_CC_CONTROL:
+                if (byte == 0x01) { // mod wheel
+                    state = WAIT_MOD_VALUE;
+                } else {
+                    state = UNKNOWN;
+                }
+                break;
+            case WAIT_MOD_VALUE:
+                mod = byte;
+                state = WAIT_CC_CONTROL;
                 break;
         }
     }
@@ -506,7 +523,8 @@ ISR (TCA0_OVF_vect)
 
     uint8_t t_byte = ((t1 | t2) & T_PERIOD_BM) << (8 - T_PERIOD_BITS);
 
-    t_byte &= last_mod;
+    //t_byte &= last_mod;
+    t_byte &= 0x80 | mod;
 
     //uint8_t t_byte = t * 5 | (t * 3 & 0x3F);
 

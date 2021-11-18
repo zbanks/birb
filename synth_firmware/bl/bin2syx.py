@@ -27,7 +27,7 @@ def write_flash(addr, b):
     return b"".join(write_flash_page(addr + i, b[i:i+64]) for i in range(0, len(b), 64))
 
 def reset_into_bl():
-    return b"\xFF" + noop(160) # 160 bytes > 50 ms (approx. reset time)
+    return b"\xFF" + noop(320) # 320 bytes > 100 ms (approx. reset time)
 
 def reset_into_app():
     return b"\xFF"
