@@ -1,0 +1,3 @@
+(fp_lib_table
+  (lib (name selector_switch)(type KiCad)(uri ${KIPRJMOD}/selector_switch.pretty)(options "")(descr ""))
+)

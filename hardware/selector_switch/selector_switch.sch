@@ -1,0 +1,268 @@
+EESchema Schematic File Version 4
+EELAYER 30 0
+EELAYER END
+$Descr A4 11693 8268
+encoding utf-8
+Sheet 1 1
+Title ""
+Date ""
+Rev ""
+Comp ""
+Comment1 ""
+Comment2 ""
+Comment3 ""
+Comment4 ""
+$EndDescr
+$Comp
+L Switch:SW_Rotary12 SW1
+U 1 1 620DEE11
+P 5300 3400
+F 0 "SW1" H 5200 4181 50  0000 C CNN
+F 1 "SW_Rotary12" H 5200 4090 50  0000 C CNN
+F 2 "selector_switch:LORIN_12P1T" H 5100 4100 50  0001 C CNN
+F 3 "http://cdn-reichelt.de/documents/datenblatt/C200/DS-Serie%23LOR.pdf" H 5100 4100 50  0001 C CNN
+	1    5300 3400
+	1    0    0    -1  
+$EndComp
+$Comp
+L Device:R R1
+U 1 1 620E0653
+P 4650 3200
+F 0 "R1" H 4720 3246 50  0000 L CNN
+F 1 "10K" H 4720 3155 50  0000 L CNN
+F 2 "Resistors_SMD:R_0603_HandSoldering" V 4580 3200 50  0001 C CNN
+F 3 "~" H 4650 3200 50  0001 C CNN
+	1    4650 3200
+	1    0    0    -1  
+$EndComp
+Wire Wire Line
+	4650 3350 4650 3400
+Wire Wire Line
+	4650 3400 4700 3400
+$Comp
+L Device:R R2
+U 1 1 620E10FD
+P 5850 2900
+F 0 "R2" V 5850 3400 50  0000 C CNN
+F 1 "1K" V 5850 3200 50  0000 C CNN
+F 2 "Resistors_SMD:R_0603_HandSoldering" V 5780 2900 50  0001 C CNN
+F 3 "~" H 5850 2900 50  0001 C CNN
+	1    5850 2900
+	0    1    1    0   
+$EndComp
+$Comp
+L Device:R R3
+U 1 1 620E25E6
+P 5850 3000
+F 0 "R3" V 5850 3500 50  0000 C CNN
+F 1 "1K8" V 5850 3300 50  0000 C CNN
+F 2 "Resistors_SMD:R_0603_HandSoldering" V 5780 3000 50  0001 C CNN
+F 3 "~" H 5850 3000 50  0001 C CNN
+	1    5850 3000
+	0    1    1    0   
+$EndComp
+$Comp
+L Device:R R4
+U 1 1 620E2830
+P 5850 3100
+F 0 "R4" V 5850 3600 50  0000 C CNN
+F 1 "2K7" V 5850 3400 50  0000 C CNN
+F 2 "Resistors_SMD:R_0603_HandSoldering" V 5780 3100 50  0001 C CNN
+F 3 "~" H 5850 3100 50  0001 C CNN
+	1    5850 3100
+	0    1    1    0   
+$EndComp
+$Comp
+L Device:R R5
+U 1 1 620E2B2A
+P 5850 3200
+F 0 "R5" V 5850 3700 50  0000 C CNN
+F 1 "3K9" V 5850 3500 50  0000 C CNN
+F 2 "Resistors_SMD:R_0603_HandSoldering" V 5780 3200 50  0001 C CNN
+F 3 "~" H 5850 3200 50  0001 C CNN
+	1    5850 3200
+	0    1    1    0   
+$EndComp
+$Comp
+L Device:R R6
+U 1 1 620E2E0C
+P 5850 3300
+F 0 "R6" V 5850 3800 50  0000 C CNN
+F 1 "5K6" V 5850 3600 50  0000 C CNN
+F 2 "Resistors_SMD:R_0603_HandSoldering" V 5780 3300 50  0001 C CNN
+F 3 "~" H 5850 3300 50  0001 C CNN
+	1    5850 3300
+	0    1    1    0   
+$EndComp
+$Comp
+L Device:R R7
+U 1 1 620E309E
+P 5850 3500
+F 0 "R7" V 5850 4000 50  0000 C CNN
+F 1 "6K8" V 5850 3800 50  0000 C CNN
+F 2 "Resistors_SMD:R_0603_HandSoldering" V 5780 3500 50  0001 C CNN
+F 3 "~" H 5850 3500 50  0001 C CNN
+	1    5850 3500
+	0    1    1    0   
+$EndComp
+$Comp
+L Device:R R8
+U 1 1 620E3380
+P 5850 3600
+F 0 "R8" V 5850 4100 50  0000 C CNN
+F 1 "8K2" V 5850 3900 50  0000 C CNN
+F 2 "Resistors_SMD:R_0603_HandSoldering" V 5780 3600 50  0001 C CNN
+F 3 "~" H 5850 3600 50  0001 C CNN
+	1    5850 3600
+	0    1    1    0   
+$EndComp
+$Comp
+L Device:R R9
+U 1 1 620E36AE
+P 5850 3700
+F 0 "R9" V 5850 4200 50  0000 C CNN
+F 1 "12K" V 5850 4000 50  0000 C CNN
+F 2 "Resistors_SMD:R_0603_HandSoldering" V 5780 3700 50  0001 C CNN
+F 3 "~" H 5850 3700 50  0001 C CNN
+	1    5850 3700
+	0    1    1    0   
+$EndComp
+$Comp
+L Device:R R10
+U 1 1 620E39A2
+P 5850 3800
+F 0 "R10" V 5850 4300 50  0000 C CNN
+F 1 "15K" V 5850 4100 50  0000 C CNN
+F 2 "Resistors_SMD:R_0603_HandSoldering" V 5780 3800 50  0001 C CNN
+F 3 "~" H 5850 3800 50  0001 C CNN
+	1    5850 3800
+	0    1    1    0   
+$EndComp
+$Comp
+L Device:R R11
+U 1 1 620E3CD7
+P 5850 3900
+F 0 "R11" V 5850 4400 50  0000 C CNN
+F 1 "18K" V 5850 4200 50  0000 C CNN
+F 2 "Resistors_SMD:R_0603_HandSoldering" V 5780 3900 50  0001 C CNN
+F 3 "~" H 5850 3900 50  0001 C CNN
+	1    5850 3900
+	0    1    1    0   
+$EndComp
+$Comp
+L Device:R R12
+U 1 1 620E3FA8
+P 5850 4000
+F 0 "R12" V 5850 4500 50  0000 C CNN
+F 1 "27K" V 5850 4300 50  0000 C CNN
+F 2 "Resistors_SMD:R_0603_HandSoldering" V 5780 4000 50  0001 C CNN
+F 3 "~" H 5850 4000 50  0001 C CNN
+	1    5850 4000
+	0    1    1    0   
+$EndComp
+Wire Wire Line
+	5700 2800 6000 2800
+Wire Wire Line
+	6000 2800 6000 2900
+Connection ~ 6000 2900
+Wire Wire Line
+	6000 2900 6000 3000
+Connection ~ 6000 3000
+Wire Wire Line
+	6000 3000 6000 3100
+Connection ~ 6000 3100
+Wire Wire Line
+	6000 3100 6000 3200
+Connection ~ 6000 3200
+Wire Wire Line
+	6000 3200 6000 3300
+Connection ~ 6000 3300
+Wire Wire Line
+	6000 3300 6000 3500
+Connection ~ 6000 3500
+Wire Wire Line
+	6000 3500 6000 3600
+Connection ~ 6000 3600
+Wire Wire Line
+	6000 3600 6000 3700
+Connection ~ 6000 3700
+Wire Wire Line
+	6000 3700 6000 3800
+Connection ~ 6000 3800
+Wire Wire Line
+	6000 3800 6000 3900
+Connection ~ 6000 3900
+Wire Wire Line
+	6000 3900 6000 4000
+Connection ~ 6000 4000
+Wire Wire Line
+	6000 4000 6000 4200
+$Comp
+L power:GND #PWR04
+U 1 1 620E60D0
+P 6000 4200
+F 0 "#PWR04" H 6000 3950 50  0001 C CNN
+F 1 "GND" H 6005 4027 50  0000 C CNN
+F 2 "" H 6000 4200 50  0001 C CNN
+F 3 "" H 6000 4200 50  0001 C CNN
+	1    6000 4200
+	1    0    0    -1  
+$EndComp
+$Comp
+L power:VCC #PWR03
+U 1 1 620E675D
+P 4650 3050
+F 0 "#PWR03" H 4650 2900 50  0001 C CNN
+F 1 "VCC" H 4665 3223 50  0000 C CNN
+F 2 "" H 4650 3050 50  0001 C CNN
+F 3 "" H 4650 3050 50  0001 C CNN
+	1    4650 3050
+	1    0    0    -1  
+$EndComp
+Wire Wire Line
+	4650 3400 4150 3400
+Connection ~ 4650 3400
+Text Label 4250 3400 0    50   ~ 0
+OUT
+$Comp
+L Connector:Conn_01x03_Female J1
+U 1 1 620E7F93
+P 3950 3400
+F 0 "J1" H 3842 3167 50  0000 C CNN
+F 1 "Conn_01x03_Female" H 3842 3166 50  0001 C CNN
+F 2 "Pin_Headers:Pin_Header_Straight_1x03" H 3950 3400 50  0001 C CNN
+F 3 "~" H 3950 3400 50  0001 C CNN
+	1    3950 3400
+	-1   0    0    1   
+$EndComp
+$Comp
+L power:VCC #PWR01
+U 1 1 620E99F8
+P 4200 3250
+F 0 "#PWR01" H 4200 3100 50  0001 C CNN
+F 1 "VCC" H 4215 3423 50  0000 C CNN
+F 2 "" H 4200 3250 50  0001 C CNN
+F 3 "" H 4200 3250 50  0001 C CNN
+	1    4200 3250
+	1    0    0    -1  
+$EndComp
+$Comp
+L power:GND #PWR02
+U 1 1 620EA646
+P 4200 3550
+F 0 "#PWR02" H 4200 3300 50  0001 C CNN
+F 1 "GND" H 4205 3377 50  0000 C CNN
+F 2 "" H 4200 3550 50  0001 C CNN
+F 3 "" H 4200 3550 50  0001 C CNN
+	1    4200 3550
+	1    0    0    -1  
+$EndComp
+Wire Wire Line
+	4150 3500 4200 3500
+Wire Wire Line
+	4200 3500 4200 3550
+Wire Wire Line
+	4150 3300 4200 3300
+Wire Wire Line
+	4200 3300 4200 3250
+$EndSCHEMATC
