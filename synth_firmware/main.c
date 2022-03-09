@@ -338,9 +338,9 @@ main (void)
 
 //BREAK
 
-//    PORTA.DIRSET = 1 << 1; // Set PA1 as output
+//    PORTB.DIRSET = 1 << 0; // Set PB0 as output
 //    for (;;) {
-//        PORTA.OUT ^= 1 << 1;
+//        PORTB.OUT ^= 1 << 1;
 //        _delay_ms(500);
 //    }
 
@@ -358,7 +358,7 @@ main (void)
     TCB0.INTCTRL |= TCB_CAPT_bm;
     TCB0.CTRLA |= TCB_ENABLE_bm;
 
-    PORTA.DIRSET = 1 << 1; // Set PA1 as output
+    PORTB.DIRSET = 1 << 0; // Set PB0 as output
 
     VREF_CTRLA |= VREF_DAC0REFSEL_2V5_gc; // VREF = 2.5V for DAC
     VREF_CTRLB |= VREF_DAC0REFEN_bm; // Force enable VREF
@@ -376,15 +376,20 @@ main (void)
     ADC0.CTRLB |= ADC_PRESC_DIV8_gc; // 1.25MHz ADC clock rate
     ADC0.CTRLC |= ADC_REFSEL_VDDREF_gc; // Use full VDD for reference
 
-    // Disable everything else on PA4
-    PORTA.PIN4CTRL &= ~PORT_ISC_gm;
-    PORTA.PIN4CTRL |= PORT_ISC_INPUT_DISABLE_gc;
-    PORTA.PIN4CTRL &= ~PORT_PULLUPEN_bm;
+    // Disable everything else on PA1
+    PORTA.PIN1CTRL &= ~PORT_ISC_gm;
+    PORTA.PIN1CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+    PORTA.PIN1CTRL &= ~PORT_PULLUPEN_bm;
 
     // Disable everything else on PA2
     PORTA.PIN2CTRL &= ~PORT_ISC_gm;
     PORTA.PIN2CTRL |= PORT_ISC_INPUT_DISABLE_gc;
     PORTA.PIN2CTRL &= ~PORT_PULLUPEN_bm;
+
+    // Disable everything else on PA4
+    PORTA.PIN4CTRL &= ~PORT_ISC_gm;
+    PORTA.PIN4CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+    PORTA.PIN4CTRL &= ~PORT_PULLUPEN_bm;
 
     ADC0.CTRLA |= ADC_ENABLE_bm; // Enable ADC
 
@@ -428,8 +433,7 @@ main (void)
 // Update modulation
 ISR (TCB0_INT_vect)
 {
-    ADC0.MUXPOS &= ~ADC_MUXPOS_AIN4_gc;
-    ADC0.MUXPOS |= ADC_MUXPOS_AIN2_gc; // Read from PA2
+    ADC0.MUXPOS |= ADC_MUXPOS_AIN1_gc; // Read from PA1
     ADC0.COMMAND |= ADC_STCONV_bm;
     while (ADC0.COMMAND & ADC_STCONV_bm);
     uint8_t knob = ADC0.RES >> 2;
@@ -488,9 +492,9 @@ ISR (TCB0_INT_vect)
     note_playing = real_velocity > 0;
 
     if (note_playing) {
-        PORTA.OUT |= 1 << 1;
+        PORTB.OUT |= 1 << 0;
     } else {
-        PORTA.OUT &= ~(1 << 1);
+        PORTB.OUT &= ~(1 << 0);
     }
     TCB0.INTFLAGS |= TCB_CAPT_bm;
 }

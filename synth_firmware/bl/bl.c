@@ -208,21 +208,21 @@ main (void)
     sei();
 
     // Wait about half a second, blinking the light
-    PORTA.DIRSET = PIN1_bm; // Set PA1 as output
+    PORTB.DIRSET = PIN0_bm; // Set PB0 as output
     for (int i = 0; i < 5; i++) {
-        PORTA.OUTSET |= PIN1_bm;
+        PORTB.OUTSET |= PIN0_bm;
         _delay_ms(20);
         if (stay_in_bootloader) break;
-        PORTA.OUTCLR |= PIN1_bm;
+        PORTB.OUTCLR |= PIN0_bm;
         _delay_ms(20);
         if (stay_in_bootloader) break;
     }
 
     if (stay_in_bootloader) {
         for (;;) {
-            PORTA.OUTSET |= PIN1_bm;
+            PORTB.OUTSET |= PIN0_bm;
             _delay_ms(20);
-            PORTA.OUTCLR |= PIN1_bm;
+            PORTB.OUTCLR |= PIN0_bm;
             _delay_ms(20);
         }
     } else {
