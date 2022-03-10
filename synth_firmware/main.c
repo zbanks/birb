@@ -10,7 +10,8 @@
 const uint16_t PERIOD_LKUP[] = {
 38223, 36077, 34052, 32141, 30337, 28635, 27027, 25511, 24079, 22727, 21452, 20248, 19111, 18039, 17026, 16071, 15169, 14317, 13514, 12755, 12039, 11364, 10726, 10124, 9556, 9019, 8513, 8035, 7584, 7159, 6757, 6378, 6020, 5682, 5363, 5062, 4778, 4510, 4257, 4018, 3792, 3579, 3378, 3189, 3010, 2841, 2681, 2531, 2389, 2255, 2128, 2009, 1896, 1790, 1689, 1594, 1505, 1420, 1341, 1265, 1194, 1127, 1064, 1004, 948, 895, 845, 797, 752, 710, 670, 633, 597, 564, 532, 502, 474, 447, 422, 399, 376, 355, 335, 316, 299, 282, 266, 251, 237, 224, 211, 199, 188, 178, 168, 158, 149, 141, 133, 126, 119, 112, 106, 100, 94, 89, 84, 79, 75, 70, 67, 63, 59, 56, 53, 50, 47, 44, 42, 40, 37, 35, 33, 31, 30, 28, 26, };
 
-static uint32_t t;
+static uint32_t t0;
+static uint32_t t1;
 static uint32_t u;
 
 static void note_on(uint8_t k, uint8_t v);
@@ -348,15 +349,19 @@ main (void)
 
     // Set up audio-frequency timer
 
-    TCA0.SINGLE.PER = 1250; // Just to get the audio loop going
-    TCA0.SINGLE.CTRLA |= TCA_SINGLE_ENABLE_bm;
-    TCA0.SINGLE.INTCTRL |= TCA_SINGLE_OVF_bm;
+    TCB0.CCMP = 1250; // Just to get the audio loop going
+    TCB0.INTCTRL |= TCB_CAPT_bm;
+    TCB0.CTRLA |= TCB_ENABLE_bm;
+
+    TCB1.CCMP = 1250; // Just to get the audio loop going
+    TCB1.INTCTRL |= TCB_CAPT_bm;
+    TCB1.CTRLA |= TCB_ENABLE_bm;
 
     // Set up modulation timer
 
-    TCB0.CCMP = 1250; // 8 KHz update rate
-    TCB0.INTCTRL |= TCB_CAPT_bm;
-    TCB0.CTRLA |= TCB_ENABLE_bm;
+    TCA0.SINGLE.PER = 1250; // 8 KHz update rate
+    TCA0.SINGLE.INTCTRL |= TCA_SINGLE_OVF_bm;
+    TCA0.SINGLE.CTRLA |= TCA_SINGLE_ENABLE_bm;
 
     PORTB.DIRSET = 1 << 0; // Set PB0 as output
 
@@ -408,7 +413,7 @@ main (void)
 	USART0.CTRLB |= USART_RXEN_bm | USART_TXEN_bm;	// Enable rx and tx
 
     // Set audio interrupt at higher priority
-    CPUINT.LVL1VEC = TCA0_OVF_vect_num;
+    //CPUINT.LVL1VEC = TCB0_OVF_vect_num;
 
     adsr_init(&amp_env, 0, 1, 127, 20, 100, 32, 0);
     //adsr_init(&amp_env, 1, 255, 127, 255);
@@ -430,13 +435,15 @@ main (void)
     for(;;);
 }
 
+uint8_t knob;
+
 // Update modulation
-ISR (TCB0_INT_vect)
+ISR (TCA0_OVF_vect)
 {
     ADC0.MUXPOS |= ADC_MUXPOS_AIN1_gc; // Read from PA1
     ADC0.COMMAND |= ADC_STCONV_bm;
     while (ADC0.COMMAND & ADC_STCONV_bm);
-    uint8_t knob = ADC0.RES >> 2;
+    knob = ADC0.RES >> 2;
 
     static uint8_t note_playing;
 
@@ -474,6 +481,7 @@ ISR (TCB0_INT_vect)
         mod_lfo_value = triangle_update(&mod_lfo, note_gate);
 
         bend = ((int16_t)pitch_lfo_value << 4);
+        bend = 0;
         //bend += ((int16_t)pitch_env_value << 4);
         //if (vel > 0) {
             //int8_t vel_lfo = triangle_update(&amp_lfo) >> 4;
@@ -496,7 +504,7 @@ ISR (TCB0_INT_vect)
     } else {
         PORTB.OUT &= ~(1 << 0);
     }
-    TCB0.INTFLAGS |= TCB_CAPT_bm;
+    TCA0.SINGLE.INTFLAGS |= TCA_SINGLE_OVF_bm;
 }
 
 static uint16_t period(int16_t note) {
@@ -516,8 +524,7 @@ static uint16_t period(int16_t note) {
 }
 
 // Update DAC
-ISR (TCA0_OVF_vect) 
-{
+static void update() {
     static uint8_t last_note;
     static uint8_t last_velocity;
     static uint8_t last_mod;
@@ -530,12 +537,13 @@ ISR (TCA0_OVF_vect)
     //t_byte = t_byte > 0 ? 0 : 255;
     //uint8_t t_byte = (t & 0xF) == 0 ? 255 : 0;
 
-    uint16_t t1 = t * 3;
-    uint16_t t2 = t * 2;
+    //uint16_t t1 = t * 3;
+    //uint16_t t2 = t * 2;
 
-    uint8_t t_byte = ((t1 | t2) & T_PERIOD_BM) << (8 - T_PERIOD_BITS);
+    //uint8_t t_byte = ((t1 | t2) & T_PERIOD_BM) << (8 - T_PERIOD_BITS);
+    uint8_t t_byte = ((t0 & 1) + (t1 & 1)) << 6;
 
-    t_byte &= 0x80 | mod;
+    //t_byte &= 0x80 | mod;
     //t_byte &= 0x80 | mod;
 
     //uint8_t t_byte = t * 5 | (t * 3 & 0x3F);
@@ -544,15 +552,52 @@ ISR (TCA0_OVF_vect)
 
     DAC0.DATA = ((uint16_t)t_byte * last_velocity) >> 8;
 
-    t++;
-
-    if ((t & T_PERIOD_BM) == 0) {
-        TCA0.SINGLE.PER = period(((int16_t)triggered_note << 8) + bend);
+    if ((t0 & T_PERIOD_BM) == 0) {
         last_note = triggered_note;
         last_velocity = real_velocity;
         //mod_lfo.high = mod;
         //mod_lfo.increment = 1 | (mod >> 5);
         last_mod = ((uint8_t)mod_lfo_value); // | ((uint8_t)mod_env_value << 1);
     }
-    TCA0.SINGLE.INTFLAGS |= TCA_SINGLE_OVF_bm;
+
+    //t++;
+
+}
+
+static uint8_t rng_x;
+static uint8_t rng_a;
+static uint8_t rng_b;
+static uint8_t rng_c;
+
+static uint8_t rand()
+{
+    rng_x++;               //x is incremented every round and is not affected by any other variable
+    rng_a = (rng_a^rng_c^rng_x);       //note the mix of addition and XOR
+    rng_b = (rng_b+rng_a);         //And the use of very few instructions
+    rng_c = (rng_c+(rng_b>>1)^rng_a);  //the right shift is to ensure that high-order bits from b can affect  
+    return rng_c;          //low order bits of other variables
+}
+
+ISR (TCB0_INT_vect) 
+{
+    t0++;
+    update();
+    if ((t0 & T_PERIOD_BM) == 0) {
+        TCB0.CCMP = period(((int16_t)triggered_note << 8) + bend) << 3;
+    }
+    TCB0.INTFLAGS |= TCB_CAPT_bm;
+}
+
+ISR (TCB1_INT_vect) 
+{
+    
+    t1++;
+    update();
+
+    uint8_t detune = ((uint16_t)knob * (uint16_t)rand()) >> 8;
+
+    if ((t1 & T_PERIOD_BM) == 0) {
+        TCB1.CCMP = (period(((int16_t)triggered_note << 8) + bend + detune) << 3);
+    }
+    TCB1.INTFLAGS |= TCB_CAPT_bm;
 }
