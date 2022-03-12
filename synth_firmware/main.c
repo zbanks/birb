@@ -316,10 +316,15 @@ main (void)
     CCP = CCP_IOREG_gc;
     CLKCTRL.MCLKCTRLB &= ~CLKCTRL_PEN_bm;
 
-    // Set up TCB0 as primary oscillator
+    // Set up TCB0 as first voice oscillator
     TCB0.CCMP = 1250; // Just to get the audio loop going
     TCB0.INTCTRL |= TCB_CAPT_bm;
     TCB0.CTRLA |= TCB_ENABLE_bm;
+
+    // Set up TCB1 as second voice oscillator
+    TCB1.CCMP = 1250; // Just to get the audio loop going
+    TCB1.INTCTRL |= TCB_CAPT_bm;
+    TCB1.CTRLA |= TCB_ENABLE_bm;
 
     //TCB1.CCMP = 1250; // Just to get the audio loop going
     //TCB1.INTCTRL |= TCB_CAPT_bm;
@@ -409,8 +414,10 @@ main (void)
 uint8_t knob;
 
 #define MIN_PER 10
-static uint16_t per1 = 1250;
-static uint16_t per2 = 1250;
+static uint16_t per11 = 1250;
+static uint16_t per12 = 1250;
+static uint16_t per21 = 1250;
+static uint16_t per22 = 1250;
 
 static uint16_t period(int16_t note) {
     // Set osc as per new note
@@ -428,7 +435,10 @@ static uint16_t period(int16_t note) {
     return per;
 }
 
-static uint8_t output_amplitude;
+static uint8_t output_amplitude1;
+static uint8_t output_amplitude2;
+static uint8_t out1;
+static uint8_t out2;
 
 // Update modulation
 static void update_modulation() {
@@ -444,25 +454,43 @@ static void update_modulation() {
 
     uint8_t detune_lfo_value = 127 + (triangle_update(&detune_lfo, 1) >> 8);
 
-    uint8_t triggered_note = note_index[0];
-    uint8_t triggered_velocity = note_velocity[0];
+    uint8_t triggered_note1 = note_index[0];
+    uint8_t triggered_velocity1 = note_velocity[0];
 
-    uint16_t output_period = period(triggered_note << 8);
-    if (output_period < 2 * MIN_PER) {
-        output_period = MIN_PER;
+    uint16_t output_period1 = period(triggered_note1 << 8);
+    if (output_period1 < 2 * MIN_PER) {
+        output_period1 = MIN_PER;
     }
-    per1 = ((uint32_t)output_period * detune_lfo_value) >> 8;
-    per2 = output_period - per1;
-    if (per1 < MIN_PER) {
-        per1 = MIN_PER;
-        per2 = output_period - MIN_PER;
-    } else if (per2 < MIN_PER) {
-        per2 = MIN_PER;
-        per1 = output_period - MIN_PER;
+    per11 = ((uint32_t)output_period1 * detune_lfo_value) >> 8;
+    per12 = output_period1 - per11;
+    if (per11 < MIN_PER) {
+        per11 = MIN_PER;
+        per12 = output_period1 - MIN_PER;
+    } else if (per12 < MIN_PER) {
+        per12 = MIN_PER;
+        per11 = output_period1 - MIN_PER;
     }
-    output_amplitude = triggered_velocity;
+    output_amplitude1 = triggered_velocity1;
 
-    if (output_amplitude > 0) {
+    uint8_t triggered_note2 = note_index[1];
+    uint8_t triggered_velocity2 = note_velocity[1];
+
+    uint16_t output_period2 = period(triggered_note2 << 8);
+    if (output_period2 < 2 * MIN_PER) {
+        output_period2 = MIN_PER;
+    }
+    per21 = ((uint32_t)output_period2 * detune_lfo_value) >> 8;
+    per22 = output_period2 - per21;
+    if (per21 < MIN_PER) {
+        per21 = MIN_PER;
+        per22 = output_period2 - MIN_PER;
+    } else if (per22 < MIN_PER) {
+        per22 = MIN_PER;
+        per21 = output_period2 - MIN_PER;
+    }
+    output_amplitude2 = triggered_velocity2;
+
+    if (output_amplitude1 > 0 || output_amplitude2 > 0) {
         PORTB.OUT |= 1 << 0;
     } else {
         PORTB.OUT &= ~(1 << 0);
@@ -484,8 +512,29 @@ ISR (TCB0_INT_vect)
     }
 
     static uint8_t t0;
-    TCB0.CCMP = (t0 & 1) ? per2 : per1;
-    DAC0.DATA = (t0 & 1) ? output_amplitude : 0;
+    TCB0.CCMP = (t0 & 1) ? per12 : per11;
+    out1 = (t0 & 1) ? output_amplitude1 : 0;
+    DAC0.DATA = out1 + out2;
+    t0++;
+}
+
+ISR (TCB1_INT_vect) 
+{
+    static uint8_t prescaler;
+
+    TCB1.INTFLAGS |= TCB_CAPT_bm;
+
+    if (prescaler > 4) {
+        prescaler = 0;
+    } else {
+        prescaler++;
+        return;
+    }
+
+    static uint8_t t0;
+    TCB1.CCMP = (t0 & 1) ? per22 : per21;
+    out2 = (t0 & 1) ? output_amplitude2 : 0;
+    DAC0.DATA = out1 + out2;
     t0++;
 }
 
