@@ -18,6 +18,8 @@ static void note_off(uint8_t k);
 static uint8_t note_index[N_VOICES];
 static uint8_t note_velocity[N_VOICES];
 
+static bool poly = true;
+
 static uint8_t mod = 0;
 
 static int8_t sadd(int8_t x, int8_t y) {
@@ -130,48 +132,56 @@ static int16_t adsr_update(struct adsr_state *state, const struct adsr_config *c
     return state->output;
 }
 
-struct triangle_state {
-    uint8_t up;
+struct triangle_config {
     int16_t low;
     int16_t high;
+    int16_t initial_value;
     int16_t increment;
+};
+
+struct triangle_state {
+    uint8_t up;
     int16_t output;
     uint8_t last_gate;
 };
 
-static void triangle_init(struct triangle_state *state, int16_t low, int16_t high, int16_t period) {
-    state->low = low;
-    state->high = high;
+static void triangle_configure(struct triangle_config *config, int16_t low, int16_t high, int16_t initial_value, int16_t period) {
+    config->low = low;
+    config->high = high;
+    config->initial_value = initial_value;
     if (period == 0) {
         period = 1;
     }
-    state->increment = (high - low) / period;
-    if (state->increment == 0) {
-        state->increment = 1;
+    config->increment = (high - low) / period;
+    if (config->increment == 0) {
+        config->increment = 1;
     }
-    state->output = low;
+}
+
+static void triangle_init(struct triangle_state *state, const struct triangle_config *config) {
+    state->output = config->low;
     state->up = 1;
     state->last_gate = 0;
 }
 
-static int16_t triangle_update(struct triangle_state *state, uint8_t gate) {
+static int16_t triangle_update(struct triangle_state *state, const struct triangle_config *config, uint8_t gate) {
     if (gate && gate != state->last_gate) {
-        state->output = state->low;
+        state->output = config->initial_value;
         state->up = 1;
     } else {
         if (state->up) {
-            if (state->output > state->high - state->increment) {
-                state->output = state->high;
+            if (state->output > config->high - config->increment) {
+                state->output = config->high;
                 state->up = 0;
             } else {
-                state->output += state->increment;
+                state->output += config->increment;
             }
         } else {
-            if (state->output < state->low + state->increment) {
-                state->output = state->low;
+            if (state->output < config->low + config->increment) {
+                state->output = config->low;
                 state->up = 1;
             } else {
-                state->output -= state->increment;
+                state->output -= config->increment;
             }
         }
     }
@@ -272,6 +282,7 @@ ISR (USART0_RXC_vect)
 static void check_notes() {
 }
 
+static struct triangle_config detune_lfo_config;
 static struct triangle_state detune_lfo;
 
 static void update_modulation();
@@ -287,18 +298,20 @@ struct osc_state {
     uint8_t triggered_velocity;
 
     struct adsr_state amp_env;
+    struct adsr_state pitch_env;
 
     // Output stuff
     int8_t amplitude;
 };
 
-static void osc_init(struct osc_state *state, const struct adsr_config *amp_env_config) {
+static void osc_init(struct osc_state *state, const struct adsr_config *amp_env_config, const struct adsr_config *pitch_env_config) {
     state->prescaler = 0;
     state->timer_period_high = 1250;
     state->timer_period_low = 1250;
     state->t = 0;
     state->amplitude = 0;
     adsr_init(&state->amp_env, amp_env_config);
+    adsr_init(&state->pitch_env, pitch_env_config);
 }
 
 static bool osc_handle_timer(struct osc_state *state, int8_t *out, volatile uint16_t *next_period) {
@@ -337,7 +350,7 @@ static uint16_t period(int16_t note) {
 
 #define MIN_PER 10
 
-static void osc_handle_note(struct osc_state *state, uint8_t note, uint8_t velocity, uint8_t detune_lfo_value, const struct adsr_config *amp_env_config) {
+static void osc_handle_note(struct osc_state *state, uint8_t note, uint8_t velocity, uint8_t detune_lfo_value, const struct adsr_config *amp_env_config, uint16_t amp_lfo_value, const struct adsr_config *pitch_env_config, int16_t pitch_lfo_value) {
     // Store triggered velocity
     uint8_t gate = 0;
     if (velocity > 0) {
@@ -346,11 +359,13 @@ static void osc_handle_note(struct osc_state *state, uint8_t note, uint8_t veloc
         gate = note + 1;
     }
 
-    // Advance envelope generators and LFOs
+    // Advance envelope generators
     int16_t amp_env_value = adsr_update(&state->amp_env, amp_env_config, gate);
+    int16_t pitch_env_value = adsr_update(&state->pitch_env, pitch_env_config, gate);
+    int16_t pitch_adjust = ((int32_t)pitch_env_value * pitch_lfo_value) >> 15;
 
     // Calculate timer periods
-    uint16_t output_period = period(state->triggered_note << 8);
+    uint16_t output_period = period((state->triggered_note << 8) + pitch_adjust);
     if (output_period < 2 * MIN_PER) {
         output_period = MIN_PER;
     }
@@ -367,12 +382,18 @@ static void osc_handle_note(struct osc_state *state, uint8_t note, uint8_t veloc
     // Update state
     state->timer_period_high = per1;
     state->timer_period_low = per2;
-    state->amplitude = ((int32_t)amp_env_value * state->triggered_velocity) >> 15;
+    int16_t amp_multiplier = ((int32_t)amp_env_value * amp_lfo_value) >> 16;
+    state->amplitude = ((int32_t)amp_multiplier * state->triggered_velocity) >> 15;
 }
 
 static struct osc_state osc[N_VOICES];
 static int8_t mixer_inputs[N_VOICES];
 static struct adsr_config global_amp_env_config;
+static struct triangle_config global_amp_lfo_config;
+static struct triangle_state global_amp_lfo;
+static struct adsr_config global_pitch_env_config;
+static struct triangle_config global_pitch_lfo_config;
+static struct triangle_state global_pitch_lfo;
 
 static void note_on(uint8_t k, uint8_t v) {
     if (v == 0) {
@@ -380,8 +401,10 @@ static void note_on(uint8_t k, uint8_t v) {
         return;
     }
 
+     uint8_t n_voices = poly ? N_VOICES : 1;
+
     // Look for a free oscillator to use
-    for (int i = 0; i < N_VOICES; i++) {
+    for (int i = 0; i < n_voices; i++) {
         if (note_velocity[i] == 0 && (note_index[i] == k || osc[i].amplitude == 0)) {
             note_index[i] = k;
             note_velocity[i] = v;
@@ -390,7 +413,7 @@ static void note_on(uint8_t k, uint8_t v) {
         }
     }
     // Look for a releasing note to use
-    for (int i = 0; i < N_VOICES; i++) {
+    for (int i = 0; i < n_voices; i++) {
         if (note_velocity[i] == 0) {
             note_index[i] = k;
             note_velocity[i] = v;
@@ -398,6 +421,9 @@ static void note_on(uint8_t k, uint8_t v) {
             return;
         }
     }
+    // Overwrite a currently playing note
+    note_index[0] = k;
+    note_velocity[0] = v;
 }
 
 static void note_off(uint8_t k) {
@@ -501,12 +527,29 @@ main (void)
     //mod_lfo.increment = 1;
     //triangle_init(&mod_lfo, 0, 0, 10); // XXX
 
-    triangle_init(&detune_lfo, 0, 0, 0);
+    // Detune
+    triangle_configure(&detune_lfo_config, 0, 0, 0, 0);
+    triangle_init(&detune_lfo, &detune_lfo_config);
+
+    // Amplitude envelope and LFO
     //adsr_configure(&global_amp_env_config, 0, 100, 127 << 8, 2000, 100 << 8, 3200, 0);
-    adsr_configure(&global_amp_env_config, 0, 1, 127 << 8, 1, 127 << 8, 100, 0);
+    adsr_configure(&global_amp_env_config, 0, 0, 127 << 8, 1, 127 << 8, 100, 0);
+    //triangle_configure(&global_amp_lfo_config, 10000, 32767, 32767, 100);
+    triangle_configure(&global_amp_lfo_config, 0, 0, 0, 100);
+    triangle_init(&global_amp_lfo, &global_amp_lfo_config);
+
+    // Pitch envelope and LFO
+    //adsr_configure(&global_pitch_env_config, -256 * 2, 300, 0, 1, 0, 0, 0);
+    const int16_t et = 6000;
+    const int16_t ev = 6000;
+    adsr_configure(&global_pitch_env_config, 0, et, ev, 0, ev, 0, ev);
+    const int16_t ot = 400;
+    const int16_t ov = 200;
+    triangle_configure(&global_pitch_lfo_config, -ov, ov, 0, ot);
+    triangle_init(&global_pitch_lfo, &global_pitch_lfo_config);
 
     for (int i = 0; i < N_VOICES; i++) {
-        osc_init(&osc[i], &global_amp_env_config);
+        osc_init(&osc[i], &global_amp_env_config, &global_pitch_env_config);
     }
 
     sei();
@@ -524,28 +567,41 @@ uint8_t knob;
 
 // Update modulation
 static void update_modulation() {
+    // Read ADC
     ADC0.MUXPOS |= ADC_MUXPOS_AIN1_gc; // Read from PA1
     ADC0.COMMAND |= ADC_STCONV_bm;
     while (ADC0.COMMAND & ADC_STCONV_bm);
     knob = ADC0.RES >> 2;
 
+    bool notes_held = false;
+    for (int i=0; i<N_VOICES; i++) {
+        notes_held = notes_held || note_velocity[i] > 0;
+    }
+
+    // Advance global detune LFO
     int16_t detune_amt = (knob < 12 ? knob : 12) << 10;
-    detune_lfo.low = -detune_amt;
-    detune_lfo.high = detune_amt;
-    detune_lfo.increment = knob >> 1;
+    detune_lfo_config.low = -detune_amt;
+    detune_lfo_config.high = detune_amt;
+    detune_lfo_config.increment = knob >> 1;
+    uint8_t detune_lfo_value = 127 + (triangle_update(&detune_lfo, &detune_lfo_config, notes_held) >> 8);
 
-    uint8_t detune_lfo_value = 127 + (triangle_update(&detune_lfo, 1) >> 8);
+    // Advance global amplitude LFO
+    uint16_t amp_lfo_value = 32767 + triangle_update(&global_amp_lfo, &global_amp_lfo_config, notes_held);
+
+    // Advance global pitch LFO
+    int16_t pitch_lfo_value = triangle_update(&global_pitch_lfo, &global_pitch_lfo_config, notes_held);
 
     for (int i=0; i<N_VOICES; i++) {
-        osc_handle_note(&osc[i], note_index[i], note_velocity[i], detune_lfo_value, &global_amp_env_config);
+        osc_handle_note(&osc[i], note_index[i], note_velocity[i], detune_lfo_value, &global_amp_env_config, amp_lfo_value, &global_pitch_env_config, pitch_lfo_value);
     }
 
-    bool active = false;
+    // See if any oscillators are outputting
+    bool led_on = false;
     for (int i=0; i<N_VOICES; i++) {
-        active = active || osc[i].amplitude > 0;
+        led_on = led_on || osc[i].amplitude > 0;
     }
 
-    if (active) {
+    if (led_on) {
         PORTB.OUT |= 1 << 0;
     } else {
         PORTB.OUT &= ~(1 << 0);
