@@ -3,6 +3,7 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
+#include <stdbool.h>
 
 #define MIDI_CHANNEL 0
 
@@ -13,9 +14,9 @@ const uint16_t PERIOD_LKUP[] = {
 static void note_on(uint8_t k, uint8_t v);
 static void note_off(uint8_t k);
 
-#define MAX_NOTES 8
-static uint8_t note_index[MAX_NOTES];
-static uint8_t note_velocity[MAX_NOTES];
+#define N_VOICES 2
+static uint8_t note_index[N_VOICES];
+static uint8_t note_velocity[N_VOICES];
 
 static uint8_t mod = 0;
 
@@ -265,7 +266,7 @@ static void note_on(uint8_t k, uint8_t v) {
         return;
     }
 
-    for (int i = 0; i < MAX_NOTES; i++) {
+    for (int i = 0; i < N_VOICES; i++) {
         if (note_velocity[i] == 0) {
             note_index[i] = k;
             note_velocity[i] = v;
@@ -276,19 +277,9 @@ static void note_on(uint8_t k, uint8_t v) {
 }
 
 static void note_off(uint8_t k) {
-    for (int i = 0; i < MAX_NOTES; i++) {
+    for (int i = 0; i < N_VOICES; i++) {
         if (note_index[i] == k && note_velocity[i] > 0) {
             note_velocity[i] = 0;
-            for (int j = i + 1; j < MAX_NOTES; j++) {
-                // Shift held notes to keep the list coherent
-                if (note_velocity[j] == 0) {
-                    break;
-                } else {
-                    note_index[j - 1] = note_index[j];
-                    note_velocity[j - 1] = note_velocity[j];
-                    note_velocity[j] = 0;
-                }
-            }
             check_notes();
             return;
         }
@@ -306,6 +297,83 @@ static void check_notes() {
 static struct triangle_state detune_lfo;
 
 static void update_modulation();
+
+struct osc_state {
+    // Low-level timer stuff
+    uint8_t prescaler;
+    uint16_t timer_period_high;
+    uint16_t timer_period_low;
+    uint8_t t;
+
+    // Input stuff
+    uint8_t amplitude;
+};
+
+static void osc_init(struct osc_state *state) {
+    state->prescaler = 0;
+    state->timer_period_high = 1250;
+    state->timer_period_low = 1250;
+    state->t = 0;
+    state->amplitude = 0;
+}
+
+static bool osc_handle_timer(struct osc_state *state, uint8_t *out, uint16_t *next_period) {
+    // Returns the output signal level
+    // and updates next_period with the time until this function should be called next
+
+    if (state->prescaler > 4) {
+        state->prescaler = 0;
+    } else {
+        state->prescaler++;
+        return false;
+    }
+
+    *next_period = (state->t & 1) ? state->timer_period_high : state->timer_period_low;
+    *out = (state->t & 1) ? state->amplitude : 0;
+    state->t++;
+    return true;
+}
+
+static uint16_t period(int16_t note) {
+    // Set osc as per new note
+    if (note < 0) { // Highest note to avoid deadlock
+        note = 0;
+    }
+    if (note > (100 << 8)) { // Highest note to avoid deadlock
+        note = (100 << 8);
+    }
+    uint8_t ix = note >> 8;
+    uint16_t per_low = PERIOD_LKUP[ix];
+    uint16_t per_high = PERIOD_LKUP[ix + 1];
+    uint8_t frac = note & 0xFF;
+    uint16_t per = ((uint32_t)per_low * (256 - frac) + (uint32_t)per_high * frac) >> 8;
+    return per;
+}
+
+
+#define MIN_PER 10
+
+static void osc_handle_note(struct osc_state *state, uint8_t note, uint8_t velocity, uint8_t detune_lfo_value) {
+    uint16_t output_period = period(note << 8);
+    if (output_period < 2 * MIN_PER) {
+        output_period = MIN_PER;
+    }
+    uint16_t per1 = ((uint32_t)output_period * detune_lfo_value) >> 8;
+    uint16_t per2 = output_period - per1;
+    if (per1 < MIN_PER) {
+        per1 = MIN_PER;
+        per2 = output_period - MIN_PER;
+    } else if (per2 < MIN_PER) {
+        per2 = MIN_PER;
+        per1 = output_period - MIN_PER;
+    }
+    state->timer_period_high = per1;
+    state->timer_period_low = per2;
+    state->amplitude = velocity << 1;
+}
+
+static struct osc_state osc[N_VOICES];
+static uint8_t mixer_inputs[N_VOICES];
 
 int
 main (void)
@@ -400,6 +468,9 @@ main (void)
 
     triangle_init(&detune_lfo, 0, 0, 0);
 
+    osc_init(&osc[0]);
+    osc_init(&osc[1]);
+
     sei();
 
     for(;;) {
@@ -412,33 +483,6 @@ main (void)
 }
 
 uint8_t knob;
-
-#define MIN_PER 10
-static uint16_t per11 = 1250;
-static uint16_t per12 = 1250;
-static uint16_t per21 = 1250;
-static uint16_t per22 = 1250;
-
-static uint16_t period(int16_t note) {
-    // Set osc as per new note
-    if (note < 0) { // Highest note to avoid deadlock
-        note = 0;
-    }
-    if (note > (100 << 8)) { // Highest note to avoid deadlock
-        note = (100 << 8);
-    }
-    uint8_t ix = note >> 8;
-    uint16_t per_low = PERIOD_LKUP[ix];
-    uint16_t per_high = PERIOD_LKUP[ix + 1];
-    uint8_t frac = note & 0xFF;
-    uint16_t per = ((uint32_t)per_low * (256 - frac) + (uint32_t)per_high * frac) >> 8;
-    return per;
-}
-
-static uint8_t output_amplitude1;
-static uint8_t output_amplitude2;
-static uint8_t out1;
-static uint8_t out2;
 
 // Update modulation
 static void update_modulation() {
@@ -454,43 +498,16 @@ static void update_modulation() {
 
     uint8_t detune_lfo_value = 127 + (triangle_update(&detune_lfo, 1) >> 8);
 
-    uint8_t triggered_note1 = note_index[0];
-    uint8_t triggered_velocity1 = note_velocity[0];
-
-    uint16_t output_period1 = period(triggered_note1 << 8);
-    if (output_period1 < 2 * MIN_PER) {
-        output_period1 = MIN_PER;
+    for (int i=0; i<N_VOICES; i++) {
+        osc_handle_note(&osc[i], note_index[i], note_velocity[i], detune_lfo_value);
     }
-    per11 = ((uint32_t)output_period1 * detune_lfo_value) >> 8;
-    per12 = output_period1 - per11;
-    if (per11 < MIN_PER) {
-        per11 = MIN_PER;
-        per12 = output_period1 - MIN_PER;
-    } else if (per12 < MIN_PER) {
-        per12 = MIN_PER;
-        per11 = output_period1 - MIN_PER;
-    }
-    output_amplitude1 = triggered_velocity1;
 
-    uint8_t triggered_note2 = note_index[1];
-    uint8_t triggered_velocity2 = note_velocity[1];
-
-    uint16_t output_period2 = period(triggered_note2 << 8);
-    if (output_period2 < 2 * MIN_PER) {
-        output_period2 = MIN_PER;
+    bool active = false;
+    for (int i=0; i<N_VOICES; i++) {
+        active = active || osc[i].amplitude > 0;
     }
-    per21 = ((uint32_t)output_period2 * detune_lfo_value) >> 8;
-    per22 = output_period2 - per21;
-    if (per21 < MIN_PER) {
-        per21 = MIN_PER;
-        per22 = output_period2 - MIN_PER;
-    } else if (per22 < MIN_PER) {
-        per22 = MIN_PER;
-        per21 = output_period2 - MIN_PER;
-    }
-    output_amplitude2 = triggered_velocity2;
 
-    if (output_amplitude1 > 0 || output_amplitude2 > 0) {
+    if (active) {
         PORTB.OUT |= 1 << 0;
     } else {
         PORTB.OUT &= ~(1 << 0);
@@ -498,56 +515,26 @@ static void update_modulation() {
 
 }
 
+static void update_output(void) {
+    uint16_t out = 0;
+    for (int i = 0; i < N_VOICES; i++) {
+        out += mixer_inputs[i];
+    }
+    DAC0.DATA = out >> 2;
+}
+
 ISR (TCB0_INT_vect) 
 {
-    static uint8_t prescaler;
-
     TCB0.INTFLAGS |= TCB_CAPT_bm;
-
-    if (prescaler > 4) {
-        prescaler = 0;
-    } else {
-        prescaler++;
-        return;
+    if (osc_handle_timer(&osc[0], &mixer_inputs[0], &TCB0.CCMP)) {
+        update_output();
     }
-
-    static uint8_t t0;
-    TCB0.CCMP = (t0 & 1) ? per12 : per11;
-    out1 = (t0 & 1) ? output_amplitude1 : 0;
-    DAC0.DATA = out1 + out2;
-    t0++;
 }
 
 ISR (TCB1_INT_vect) 
 {
-    static uint8_t prescaler;
-
     TCB1.INTFLAGS |= TCB_CAPT_bm;
-
-    if (prescaler > 4) {
-        prescaler = 0;
-    } else {
-        prescaler++;
-        return;
+    if (osc_handle_timer(&osc[1], &mixer_inputs[1], &TCB1.CCMP)) {
+        update_output();
     }
-
-    static uint8_t t0;
-    TCB1.CCMP = (t0 & 1) ? per22 : per21;
-    out2 = (t0 & 1) ? output_amplitude2 : 0;
-    DAC0.DATA = out1 + out2;
-    t0++;
 }
-
-//ISR (TCB1_INT_vect) 
-//{
-//    
-//    t1++;
-//    update();
-//
-//    uint8_t detune = ((uint16_t)knob * (uint16_t)rand()) >> 8;
-//
-//    if ((t1 & T_PERIOD_BM) == 0) {
-//        TCB1.CCMP = (period(((int16_t)triggered_note << 8) + bend + detune) << 3);
-//    }
-//    TCB1.INTFLAGS |= TCB_CAPT_bm;
-//}
