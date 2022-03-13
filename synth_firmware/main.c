@@ -282,9 +282,6 @@ ISR (USART0_RXC_vect)
 static void check_notes() {
 }
 
-static struct triangle_config detune_lfo_config;
-static struct triangle_state detune_lfo;
-
 static void update_modulation();
 
 struct osc_state {
@@ -345,6 +342,7 @@ static struct global_config {
     struct triangle_config amp_lfo_config;
     struct adsr_config pitch_env_config;
     struct triangle_config pitch_lfo_config;
+    struct triangle_config pwm_lfo_config;
     uint16_t arp_period;
 } global_config;
 
@@ -353,6 +351,7 @@ static struct global_state {
     int8_t mixer_inputs[N_VOICES];
     struct triangle_state amp_lfo;
     struct triangle_state pitch_lfo;
+    struct triangle_state pwm_lfo;
     int8_t arp_note;
 } global;
 
@@ -487,40 +486,6 @@ main (void)
     USART0.CTRLA |= USART_RXCIE_bm; // Receive data interrupt enable
 	USART0.CTRLB |= USART_RXEN_bm | USART_TXEN_bm;	// Enable rx and tx
 
-    //adsr_init(&amp_env, 0, 1, 127, 20, 100, 32, 0);
-    //adsr_init(&amp_env, 1, 255, 127, 255);
-    //triangle_init(&amp_lfo, -100, 100, 30);
-
-    //adsr_init(&pitch_env, 0, 1, 0, 1, 0, 100, -127);
-    //triangle_init(&pitch_lfo, -60, 60, 30);
-    //adsr_init(&pitch_lfo_env, 0, 100, 100, 1, 100, 1, 100);
-
-    //adsr_init(&mod_env, 127, 100, 64 + 32, 1, 64 + 32, 100, 127);
-    //triangle_init(&mod_lfo, 20, 100, 100);
-    //mod_lfo.increment = 1;
-    //triangle_init(&mod_lfo, 0, 0, 10); // XXX
-
-    // Detune
-    triangle_configure(&detune_lfo_config, 0, 0, 0, 0);
-    triangle_init(&detune_lfo, &detune_lfo_config);
-
-    // Amplitude envelope and LFO
-    //adsr_configure(&global_amp_env_config, 0, 100, 127 << 8, 2000, 100 << 8, 3200, 0);
-    adsr_configure(&global_config.amp_env_config, 0, 0, 127 << 8, 1, 127 << 8, 100, 0);
-    //triangle_configure(&global_amp_lfo_config, 10000, 32767, 32767, 100);
-    triangle_configure(&global_config.amp_lfo_config, 0, 0, 0, 100);
-    triangle_init(&global.amp_lfo, &global_config.amp_lfo_config);
-
-    // Pitch envelope and LFO
-    //adsr_configure(&global_pitch_env_config, -256 * 2, 300, 0, 1, 0, 0, 0);
-    const int16_t et = 6000;
-    const int16_t ev = 6000;
-    adsr_configure(&global_config.pitch_env_config, 0, et, ev, 0, ev, 0, ev);
-    const int16_t ot = 400;
-    const int16_t ov = 200;
-    triangle_configure(&global_config.pitch_lfo_config, -ov, ov, 0, ot);
-    triangle_init(&global.pitch_lfo, &global_config.pitch_lfo_config);
-
     global_osc_init();
 
     sei();
@@ -540,7 +505,110 @@ static struct knobs {
     uint8_t freq;
 } knobs;
 
-static void select_changed() {
+static void init_basic() {
+    //adsr_init(&amp_env, 0, 1, 127, 20, 100, 32, 0);
+    //adsr_init(&amp_env, 1, 255, 127, 255);
+    //triangle_init(&amp_lfo, -100, 100, 30);
+
+    //adsr_init(&pitch_env, 0, 1, 0, 1, 0, 100, -127);
+    //triangle_init(&pitch_lfo, -60, 60, 30);
+    //adsr_init(&pitch_lfo_env, 0, 100, 100, 1, 100, 1, 100);
+
+    //adsr_init(&mod_env, 127, 100, 64 + 32, 1, 64 + 32, 100, 127);
+    //triangle_init(&mod_lfo, 20, 100, 100);
+    //mod_lfo.increment = 1;
+    //triangle_init(&mod_lfo, 0, 0, 10); // XXX
+
+    // Detune
+    triangle_configure(&global_config.pwm_lfo_config, 0, 0, 0, 0);
+    triangle_init(&global.pwm_lfo, &global_config.pwm_lfo_config);
+
+    // Amplitude envelope and LFO
+    //adsr_configure(&global_amp_env_config, 0, 100, 127 << 8, 2000, 100 << 8, 3200, 0);
+    adsr_configure(&global_config.amp_env_config, 0, 0, 127 << 8, 1, 127 << 8, 100, 0);
+    //triangle_configure(&global_amp_lfo_config, 10000, 32767, 32767, 100);
+    triangle_configure(&global_config.amp_lfo_config, 0, 0, 0, 100);
+    triangle_init(&global.amp_lfo, &global_config.amp_lfo_config);
+
+    // Pitch envelope and LFO
+    //adsr_configure(&global_pitch_env_config, -256 * 2, 300, 0, 1, 0, 0, 0);
+    const int16_t et = 6000;
+    const int16_t ev = 6000;
+    adsr_configure(&global_config.pitch_env_config, 0, et, ev, 0, ev, 0, ev);
+    const int16_t ot = 400;
+    const int16_t ov = 200;
+    triangle_configure(&global_config.pitch_lfo_config, -ov, ov, 0, ot);
+    triangle_init(&global.pitch_lfo, &global_config.pitch_lfo_config);
+}
+
+static void mod_basic() {
+    // Detune based on depth knob
+    int16_t pwm_amt = (knobs.depth < 12 ? knobs.depth : 12) << 10;
+    global_config.pwm_lfo_config.low = -pwm_amt;
+    global_config.pwm_lfo_config.high = pwm_amt;
+    global_config.pwm_lfo_config.increment = knobs.depth >> 1;
+}
+
+static const struct patches {
+    void (*init_fn)();
+    void (*mod_fn)();
+} patches[12] = {
+    {
+        .init_fn = init_basic,
+        .mod_fn = mod_basic,
+    },
+    {
+        .init_fn = init_basic,
+        .mod_fn = mod_basic,
+    },
+    {
+        .init_fn = init_basic,
+        .mod_fn = mod_basic,
+    },
+    {
+        .init_fn = init_basic,
+        .mod_fn = mod_basic,
+    },
+    {
+        .init_fn = init_basic,
+        .mod_fn = mod_basic,
+    },
+    {
+        .init_fn = init_basic,
+        .mod_fn = mod_basic,
+    },
+    {
+        .init_fn = init_basic,
+        .mod_fn = mod_basic,
+    },
+    {
+        .init_fn = init_basic,
+        .mod_fn = mod_basic,
+    },
+    {
+        .init_fn = init_basic,
+        .mod_fn = mod_basic,
+    },
+    {
+        .init_fn = init_basic,
+        .mod_fn = mod_basic,
+    },
+    {
+        .init_fn = init_basic,
+        .mod_fn = mod_basic,
+    },
+    {
+        .init_fn = init_basic,
+        .mod_fn = mod_basic,
+    },
+};
+
+static void patch_init() {
+    patches[knobs.select].init_fn();
+}
+
+static void patch_mod() {
+    patches[knobs.select].mod_fn();
 }
 
 static void read_knobs() {
@@ -560,6 +628,7 @@ static void read_knobs() {
     ADC0.COMMAND |= ADC_STCONV_bm;
     while (ADC0.COMMAND & ADC_STCONV_bm);
     uint8_t read_select = ADC0.RES >> 6;
+    if (read_select > 12) read_select = 12;
 
     if (read_depth != last_depth) {
         last_depth = read_depth;
@@ -572,7 +641,7 @@ static void read_knobs() {
     if (read_select != last_select) {
         last_select = read_select;
         knobs.select = read_select;
-        select_changed();
+        patch_init();
     }
 }
 
@@ -583,17 +652,15 @@ uint8_t freq;
 static void update_modulation() {
     read_knobs();
 
+    patch_mod();
+
     bool notes_held = false;
     for (int i=0; i<N_VOICES; i++) {
         notes_held = notes_held || note_velocity[i] > 0;
     }
 
-    // Advance global detune LFO
-    int16_t detune_amt = (knobs.depth < 12 ? knobs.depth : 12) << 10;
-    detune_lfo_config.low = -detune_amt;
-    detune_lfo_config.high = detune_amt;
-    detune_lfo_config.increment = knobs.depth >> 1;
-    uint8_t detune_lfo_value = 127 + (triangle_update(&detune_lfo, &detune_lfo_config, notes_held) >> 8);
+    // Advance global pwm LFO
+    uint8_t pwm_lfo_value = 127 + (triangle_update(&global.pwm_lfo, &global_config.pwm_lfo_config, notes_held) >> 8);
 
     // Advance global amplitude LFO
     uint16_t amp_lfo_value = 32767 + triangle_update(&global.amp_lfo, &global_config.amp_lfo_config, notes_held);
@@ -628,6 +695,7 @@ static void update_modulation() {
 
     global.arp_note = -12 + (arp_index & 1) * 12;
 
+    // Advance each oscillator
     for (int i=0; i<N_VOICES; i++) {
         struct osc_state *osc = &global.osc[i];
         uint8_t note = note_index[i];
@@ -651,7 +719,7 @@ static void update_modulation() {
         if (output_period < 2 * MIN_PER) {
             output_period = MIN_PER;
         }
-        uint16_t per1 = ((uint32_t)output_period * detune_lfo_value) >> 8;
+        uint16_t per1 = ((uint32_t)output_period * pwm_lfo_value) >> 8;
         uint16_t per2 = output_period - per1;
         if (per1 < MIN_PER) {
             per1 = MIN_PER;
@@ -661,7 +729,7 @@ static void update_modulation() {
             per1 = output_period - MIN_PER;
         }
 
-        // Update osc
+        // Update low-level osc state
         osc->timer_period_high = per1;
         osc->timer_period_low = per2;
         int16_t amp_multiplier = ((int32_t)amp_env_value * amp_lfo_value) >> 16;
