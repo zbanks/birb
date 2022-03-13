@@ -14,7 +14,7 @@ const uint16_t PERIOD_LKUP[] = {
 static void note_on(uint8_t k, uint8_t v);
 static void note_off(uint8_t k);
 
-#define N_VOICES 2
+#define N_VOICES 3
 static uint8_t note_index[N_VOICES];
 static uint8_t note_velocity[N_VOICES];
 
@@ -384,25 +384,24 @@ main (void)
     CCP = CCP_IOREG_gc;
     CLKCTRL.MCLKCTRLB &= ~CLKCTRL_PEN_bm;
 
-    // Set up TCB0 as first voice oscillator
+    // Set up TCA0 as first voice oscillator
+    TCA0.SINGLE.PER = 1250; // 8 KHz update rate
+    TCA0.SINGLE.INTCTRL |= TCA_SINGLE_OVF_bm;
+    TCA0.SINGLE.CTRLA |= TCA_SINGLE_ENABLE_bm;
+
+    // Set up TCB0 as second voice oscillator
     TCB0.CCMP = 1250; // Just to get the audio loop going
     TCB0.INTCTRL |= TCB_CAPT_bm;
     TCB0.CTRLA |= TCB_ENABLE_bm;
 
-    // Set up TCB1 as second voice oscillator
+    // Set up TCB1 as third voice oscillator
     TCB1.CCMP = 1250; // Just to get the audio loop going
     TCB1.INTCTRL |= TCB_CAPT_bm;
     TCB1.CTRLA |= TCB_ENABLE_bm;
 
-    //TCB1.CCMP = 1250; // Just to get the audio loop going
-    //TCB1.INTCTRL |= TCB_CAPT_bm;
-    //TCB1.CTRLA |= TCB_ENABLE_bm;
-
     // Set up modulation timer
-
-    TCA0.SINGLE.PER = 1250; // 8 KHz update rate
-    //TCA0.SINGLE.INTCTRL |= TCA_SINGLE_OVF_bm;
-    TCA0.SINGLE.CTRLA |= TCA_SINGLE_ENABLE_bm;
+    TCD0.CMPBCLR = 1250; // 8 KHz update rate
+    TCD0.CTRLA |= TCD_ENABLE_bm;
 
     PORTB.DIRSET = 1 << 0; // Set PB0 as output
 
@@ -468,15 +467,16 @@ main (void)
 
     triangle_init(&detune_lfo, 0, 0, 0);
 
-    osc_init(&osc[0]);
-    osc_init(&osc[1]);
+    for (int i = 0; i < N_VOICES; i++) {
+        osc_init(&osc[i]);
+    }
 
     sei();
 
     for(;;) {
         asm volatile("": : :"memory");
-        if (TCA0.SINGLE.INTFLAGS & TCA_SINGLE_OVF_bm) {
-            TCA0.SINGLE.INTFLAGS |= TCA_SINGLE_OVF_bm;
+        if (TCD0.INTFLAGS & TCD_OVF_bm) {
+            TCD0.INTFLAGS |= TCD_OVF_bm;
             update_modulation();
         }
     }
@@ -523,10 +523,18 @@ static void update_output(void) {
     DAC0.DATA = out >> 2;
 }
 
+ISR (TCA0_OVF_vect) 
+{
+    TCA0.SINGLE.INTFLAGS |= TCA_SINGLE_OVF_bm;
+    if (osc_handle_timer(&osc[0], &mixer_inputs[0], &TCA0.SINGLE.PER)) {
+        update_output();
+    }
+}
+
 ISR (TCB0_INT_vect) 
 {
     TCB0.INTFLAGS |= TCB_CAPT_bm;
-    if (osc_handle_timer(&osc[0], &mixer_inputs[0], &TCB0.CCMP)) {
+    if (osc_handle_timer(&osc[1], &mixer_inputs[1], &TCB0.CCMP)) {
         update_output();
     }
 }
@@ -534,7 +542,7 @@ ISR (TCB0_INT_vect)
 ISR (TCB1_INT_vect) 
 {
     TCB1.INTFLAGS |= TCB_CAPT_bm;
-    if (osc_handle_timer(&osc[1], &mixer_inputs[1], &TCB1.CCMP)) {
+    if (osc_handle_timer(&osc[2], &mixer_inputs[2], &TCB1.CCMP)) {
         update_output();
     }
 }
