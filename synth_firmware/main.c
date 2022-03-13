@@ -18,7 +18,7 @@ static void note_off(uint8_t k);
 static uint8_t note_index[N_VOICES];
 static uint8_t note_velocity[N_VOICES];
 
-static bool poly = true;
+static bool poly = false;
 
 static uint8_t mod = 0;
 
@@ -350,7 +350,7 @@ static uint16_t period(int16_t note) {
 
 #define MIN_PER 10
 
-static void osc_handle_note(struct osc_state *state, uint8_t note, uint8_t velocity, uint8_t detune_lfo_value, const struct adsr_config *amp_env_config, uint16_t amp_lfo_value, const struct adsr_config *pitch_env_config, int16_t pitch_lfo_value) {
+static void osc_handle_note(struct osc_state *state, uint8_t note, uint8_t velocity, uint8_t detune_lfo_value, const struct adsr_config *amp_env_config, uint16_t amp_lfo_value, const struct adsr_config *pitch_env_config, int16_t pitch_lfo_value, int8_t arp_note) {
     // Store triggered velocity
     uint8_t gate = 0;
     if (velocity > 0) {
@@ -365,7 +365,7 @@ static void osc_handle_note(struct osc_state *state, uint8_t note, uint8_t veloc
     int16_t pitch_adjust = ((int32_t)pitch_env_value * pitch_lfo_value) >> 15;
 
     // Calculate timer periods
-    uint16_t output_period = period((state->triggered_note << 8) + pitch_adjust);
+    uint16_t output_period = period(((state->triggered_note + arp_note) << 8) + pitch_adjust);
     if (output_period < 2 * MIN_PER) {
         output_period = MIN_PER;
     }
@@ -394,6 +394,7 @@ static struct triangle_state global_amp_lfo;
 static struct adsr_config global_pitch_env_config;
 static struct triangle_config global_pitch_lfo_config;
 static struct triangle_state global_pitch_lfo;
+static uint16_t global_arp_period;
 
 static void note_on(uint8_t k, uint8_t v) {
     if (v == 0) {
@@ -563,15 +564,20 @@ main (void)
     }
 }
 
-uint8_t knob;
+uint8_t depth;
+uint8_t freq;
 
 // Update modulation
 static void update_modulation() {
     // Read ADC
-    ADC0.MUXPOS |= ADC_MUXPOS_AIN1_gc; // Read from PA1
+    ADC0.MUXPOS = ADC_MUXPOS_AIN1_gc; // Read from PA1
     ADC0.COMMAND |= ADC_STCONV_bm;
     while (ADC0.COMMAND & ADC_STCONV_bm);
-    knob = ADC0.RES >> 2;
+    depth = ADC0.RES >> 2;
+    ADC0.MUXPOS = ADC_MUXPOS_AIN2_gc; // Read from PA2
+    ADC0.COMMAND |= ADC_STCONV_bm;
+    while (ADC0.COMMAND & ADC_STCONV_bm);
+    freq = ADC0.RES >> 2;
 
     bool notes_held = false;
     for (int i=0; i<N_VOICES; i++) {
@@ -579,10 +585,10 @@ static void update_modulation() {
     }
 
     // Advance global detune LFO
-    int16_t detune_amt = (knob < 12 ? knob : 12) << 10;
+    int16_t detune_amt = (depth < 12 ? depth : 12) << 10;
     detune_lfo_config.low = -detune_amt;
     detune_lfo_config.high = detune_amt;
-    detune_lfo_config.increment = knob >> 1;
+    detune_lfo_config.increment = depth >> 1;
     uint8_t detune_lfo_value = 127 + (triangle_update(&detune_lfo, &detune_lfo_config, notes_held) >> 8);
 
     // Advance global amplitude LFO
@@ -591,8 +597,35 @@ static void update_modulation() {
     // Advance global pitch LFO
     int16_t pitch_lfo_value = triangle_update(&global_pitch_lfo, &global_pitch_lfo_config, notes_held);
 
+    // Advance arp, if appropriate
+    global_arp_period = (int16_t)freq * 10;
+    uint8_t arp_gate = notes_held;
+    static uint8_t last_arp_gate;
+    static uint16_t arp_timer;
+    static uint16_t arp_index;
+    if (arp_gate && arp_gate != last_arp_gate) {
+        arp_timer = 0;
+        arp_index = 0;
+    }
+    //static int8_t arp_note;
+    if (arp_gate) {
+        arp_timer++;
+        if (arp_timer > global_arp_period) {
+            arp_timer = 0;
+            // Advance arp
+            //int8_t new_note = arp_note;
+            //while (new_note == arp_note) new_note = (rand() & 7) - 4;
+            //arp_note = new_note;
+            arp_index++;
+        }
+    }
+    last_arp_gate = arp_gate;
+    // End arp
+
+    int8_t arp_note = -12 + (arp_index & 1) * 12;
+
     for (int i=0; i<N_VOICES; i++) {
-        osc_handle_note(&osc[i], note_index[i], note_velocity[i], detune_lfo_value, &global_amp_env_config, amp_lfo_value, &global_pitch_env_config, pitch_lfo_value);
+        osc_handle_note(&osc[i], note_index[i], note_velocity[i], detune_lfo_value, &global_amp_env_config, amp_lfo_value, &global_pitch_env_config, pitch_lfo_value, arp_note);
     }
 
     // See if any oscillators are outputting
