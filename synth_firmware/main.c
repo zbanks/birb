@@ -18,7 +18,7 @@ static void note_off(uint8_t k);
 static uint8_t note_index[N_VOICES];
 static uint8_t note_velocity[N_VOICES];
 
-static bool poly = false;
+static bool poly = true;
 
 static uint8_t mod = 0;
 
@@ -304,16 +304,6 @@ struct osc_state {
     int8_t amplitude;
 };
 
-static void osc_init(struct osc_state *state, const struct adsr_config *amp_env_config, const struct adsr_config *pitch_env_config) {
-    state->prescaler = 0;
-    state->timer_period_high = 1250;
-    state->timer_period_low = 1250;
-    state->t = 0;
-    state->amplitude = 0;
-    adsr_init(&state->amp_env, amp_env_config);
-    adsr_init(&state->pitch_env, pitch_env_config);
-}
-
 static bool osc_handle_timer(struct osc_state *state, int8_t *out, volatile uint16_t *next_period) {
     // Returns the output signal level
     // and updates next_period with the time until this function should be called next
@@ -350,51 +340,33 @@ static uint16_t period(int16_t note) {
 
 #define MIN_PER 10
 
-static void osc_handle_note(struct osc_state *state, uint8_t note, uint8_t velocity, uint8_t detune_lfo_value, const struct adsr_config *amp_env_config, uint16_t amp_lfo_value, const struct adsr_config *pitch_env_config, int16_t pitch_lfo_value, int8_t arp_note) {
-    // Store triggered velocity
-    uint8_t gate = 0;
-    if (velocity > 0) {
-        state->triggered_note = note;
-        state->triggered_velocity = velocity;
-        gate = note + 1;
-    }
+static struct global_config {
+    struct adsr_config amp_env_config;
+    struct triangle_config amp_lfo_config;
+    struct adsr_config pitch_env_config;
+    struct triangle_config pitch_lfo_config;
+    uint16_t arp_period;
+} global_config;
 
-    // Advance envelope generators
-    int16_t amp_env_value = adsr_update(&state->amp_env, amp_env_config, gate);
-    int16_t pitch_env_value = adsr_update(&state->pitch_env, pitch_env_config, gate);
-    int16_t pitch_adjust = ((int32_t)pitch_env_value * pitch_lfo_value) >> 15;
+static struct global_state {
+    struct osc_state osc[N_VOICES];
+    int8_t mixer_inputs[N_VOICES];
+    struct triangle_state amp_lfo;
+    struct triangle_state pitch_lfo;
+    int8_t arp_note;
+} global;
 
-    // Calculate timer periods
-    uint16_t output_period = period(((state->triggered_note + arp_note) << 8) + pitch_adjust);
-    if (output_period < 2 * MIN_PER) {
-        output_period = MIN_PER;
+static void global_osc_init() {
+    for (int i = 0; i < N_VOICES; i++) {
+        global.osc[i].prescaler = 0;
+        global.osc[i].timer_period_high = 1250;
+        global.osc[i].timer_period_low = 1250;
+        global.osc[i].t = 0;
+        global.osc[i].amplitude = 0;
+        adsr_init(&global.osc[i].amp_env, &global_config.amp_env_config);
+        adsr_init(&global.osc[i].pitch_env, &global_config.pitch_env_config);
     }
-    uint16_t per1 = ((uint32_t)output_period * detune_lfo_value) >> 8;
-    uint16_t per2 = output_period - per1;
-    if (per1 < MIN_PER) {
-        per1 = MIN_PER;
-        per2 = output_period - MIN_PER;
-    } else if (per2 < MIN_PER) {
-        per2 = MIN_PER;
-        per1 = output_period - MIN_PER;
-    }
-
-    // Update state
-    state->timer_period_high = per1;
-    state->timer_period_low = per2;
-    int16_t amp_multiplier = ((int32_t)amp_env_value * amp_lfo_value) >> 16;
-    state->amplitude = ((int32_t)amp_multiplier * state->triggered_velocity) >> 15;
 }
-
-static struct osc_state osc[N_VOICES];
-static int8_t mixer_inputs[N_VOICES];
-static struct adsr_config global_amp_env_config;
-static struct triangle_config global_amp_lfo_config;
-static struct triangle_state global_amp_lfo;
-static struct adsr_config global_pitch_env_config;
-static struct triangle_config global_pitch_lfo_config;
-static struct triangle_state global_pitch_lfo;
-static uint16_t global_arp_period;
 
 static void note_on(uint8_t k, uint8_t v) {
     if (v == 0) {
@@ -406,7 +378,7 @@ static void note_on(uint8_t k, uint8_t v) {
 
     // Look for a free oscillator to use
     for (int i = 0; i < n_voices; i++) {
-        if (note_velocity[i] == 0 && (note_index[i] == k || osc[i].amplitude == 0)) {
+        if (note_velocity[i] == 0 && (note_index[i] == k || global.osc[i].amplitude == 0)) {
             note_index[i] = k;
             note_velocity[i] = v;
             check_notes();
@@ -534,24 +506,22 @@ main (void)
 
     // Amplitude envelope and LFO
     //adsr_configure(&global_amp_env_config, 0, 100, 127 << 8, 2000, 100 << 8, 3200, 0);
-    adsr_configure(&global_amp_env_config, 0, 0, 127 << 8, 1, 127 << 8, 100, 0);
+    adsr_configure(&global_config.amp_env_config, 0, 0, 127 << 8, 1, 127 << 8, 100, 0);
     //triangle_configure(&global_amp_lfo_config, 10000, 32767, 32767, 100);
-    triangle_configure(&global_amp_lfo_config, 0, 0, 0, 100);
-    triangle_init(&global_amp_lfo, &global_amp_lfo_config);
+    triangle_configure(&global_config.amp_lfo_config, 0, 0, 0, 100);
+    triangle_init(&global.amp_lfo, &global_config.amp_lfo_config);
 
     // Pitch envelope and LFO
     //adsr_configure(&global_pitch_env_config, -256 * 2, 300, 0, 1, 0, 0, 0);
     const int16_t et = 6000;
     const int16_t ev = 6000;
-    adsr_configure(&global_pitch_env_config, 0, et, ev, 0, ev, 0, ev);
+    adsr_configure(&global_config.pitch_env_config, 0, et, ev, 0, ev, 0, ev);
     const int16_t ot = 400;
     const int16_t ov = 200;
-    triangle_configure(&global_pitch_lfo_config, -ov, ov, 0, ot);
-    triangle_init(&global_pitch_lfo, &global_pitch_lfo_config);
+    triangle_configure(&global_config.pitch_lfo_config, -ov, ov, 0, ot);
+    triangle_init(&global.pitch_lfo, &global_config.pitch_lfo_config);
 
-    for (int i = 0; i < N_VOICES; i++) {
-        osc_init(&osc[i], &global_amp_env_config, &global_pitch_env_config);
-    }
+    global_osc_init();
 
     sei();
 
@@ -564,20 +534,54 @@ main (void)
     }
 }
 
+static struct knobs {
+    uint8_t select;
+    uint8_t depth;
+    uint8_t freq;
+} knobs;
+
+static void select_changed() {
+}
+
+static void read_knobs() {
+    static uint8_t last_select = 255;
+    static uint8_t last_depth;
+    static uint8_t last_freq;
+
+    ADC0.MUXPOS = ADC_MUXPOS_AIN1_gc; // Read from PA1
+    ADC0.COMMAND |= ADC_STCONV_bm;
+    while (ADC0.COMMAND & ADC_STCONV_bm);
+    uint8_t read_depth = ADC0.RES >> 2;
+    ADC0.MUXPOS = ADC_MUXPOS_AIN2_gc; // Read from PA2
+    ADC0.COMMAND |= ADC_STCONV_bm;
+    while (ADC0.COMMAND & ADC_STCONV_bm);
+    uint8_t read_freq = ADC0.RES >> 2;
+    ADC0.MUXPOS = ADC_MUXPOS_AIN4_gc; // Read from PA4
+    ADC0.COMMAND |= ADC_STCONV_bm;
+    while (ADC0.COMMAND & ADC_STCONV_bm);
+    uint8_t read_select = ADC0.RES >> 6;
+
+    if (read_depth != last_depth) {
+        last_depth = read_depth;
+        knobs.depth = read_depth;
+    }
+    if (read_freq != last_freq) {
+        last_freq = read_freq;
+        knobs.freq = read_freq;
+    }
+    if (read_select != last_select) {
+        last_select = read_select;
+        knobs.select = read_select;
+        select_changed();
+    }
+}
+
 uint8_t depth;
 uint8_t freq;
 
 // Update modulation
 static void update_modulation() {
-    // Read ADC
-    ADC0.MUXPOS = ADC_MUXPOS_AIN1_gc; // Read from PA1
-    ADC0.COMMAND |= ADC_STCONV_bm;
-    while (ADC0.COMMAND & ADC_STCONV_bm);
-    depth = ADC0.RES >> 2;
-    ADC0.MUXPOS = ADC_MUXPOS_AIN2_gc; // Read from PA2
-    ADC0.COMMAND |= ADC_STCONV_bm;
-    while (ADC0.COMMAND & ADC_STCONV_bm);
-    freq = ADC0.RES >> 2;
+    read_knobs();
 
     bool notes_held = false;
     for (int i=0; i<N_VOICES; i++) {
@@ -585,20 +589,20 @@ static void update_modulation() {
     }
 
     // Advance global detune LFO
-    int16_t detune_amt = (depth < 12 ? depth : 12) << 10;
+    int16_t detune_amt = (knobs.depth < 12 ? knobs.depth : 12) << 10;
     detune_lfo_config.low = -detune_amt;
     detune_lfo_config.high = detune_amt;
-    detune_lfo_config.increment = depth >> 1;
+    detune_lfo_config.increment = knobs.depth >> 1;
     uint8_t detune_lfo_value = 127 + (triangle_update(&detune_lfo, &detune_lfo_config, notes_held) >> 8);
 
     // Advance global amplitude LFO
-    uint16_t amp_lfo_value = 32767 + triangle_update(&global_amp_lfo, &global_amp_lfo_config, notes_held);
+    uint16_t amp_lfo_value = 32767 + triangle_update(&global.amp_lfo, &global_config.amp_lfo_config, notes_held);
 
     // Advance global pitch LFO
-    int16_t pitch_lfo_value = triangle_update(&global_pitch_lfo, &global_pitch_lfo_config, notes_held);
+    int16_t pitch_lfo_value = triangle_update(&global.pitch_lfo, &global_config.pitch_lfo_config, notes_held);
 
     // Advance arp, if appropriate
-    global_arp_period = (int16_t)freq * 10;
+    global_config.arp_period = (int16_t)knobs.freq * 10;
     uint8_t arp_gate = notes_held;
     static uint8_t last_arp_gate;
     static uint16_t arp_timer;
@@ -610,7 +614,7 @@ static void update_modulation() {
     //static int8_t arp_note;
     if (arp_gate) {
         arp_timer++;
-        if (arp_timer > global_arp_period) {
+        if (arp_timer > global_config.arp_period) {
             arp_timer = 0;
             // Advance arp
             //int8_t new_note = arp_note;
@@ -622,16 +626,52 @@ static void update_modulation() {
     last_arp_gate = arp_gate;
     // End arp
 
-    int8_t arp_note = -12 + (arp_index & 1) * 12;
+    global.arp_note = -12 + (arp_index & 1) * 12;
 
     for (int i=0; i<N_VOICES; i++) {
-        osc_handle_note(&osc[i], note_index[i], note_velocity[i], detune_lfo_value, &global_amp_env_config, amp_lfo_value, &global_pitch_env_config, pitch_lfo_value, arp_note);
+        struct osc_state *osc = &global.osc[i];
+        uint8_t note = note_index[i];
+        uint8_t velocity = note_velocity[i];
+
+        // Store triggered velocity
+        uint8_t gate = 0;
+        if (velocity > 0) {
+            osc->triggered_note = note;
+            osc->triggered_velocity = velocity;
+            gate = note + 1;
+        }
+
+        // Advance envelope generators
+        int16_t amp_env_value = adsr_update(&osc->amp_env, &global_config.amp_env_config, gate);
+        int16_t pitch_env_value = adsr_update(&osc->pitch_env, &global_config.pitch_env_config, gate);
+        int16_t pitch_adjust = ((int32_t)pitch_env_value * pitch_lfo_value) >> 15;
+
+        // Calculate timer periods
+        uint16_t output_period = period(((osc->triggered_note + global.arp_note) << 8) + pitch_adjust);
+        if (output_period < 2 * MIN_PER) {
+            output_period = MIN_PER;
+        }
+        uint16_t per1 = ((uint32_t)output_period * detune_lfo_value) >> 8;
+        uint16_t per2 = output_period - per1;
+        if (per1 < MIN_PER) {
+            per1 = MIN_PER;
+            per2 = output_period - MIN_PER;
+        } else if (per2 < MIN_PER) {
+            per2 = MIN_PER;
+            per1 = output_period - MIN_PER;
+        }
+
+        // Update osc
+        osc->timer_period_high = per1;
+        osc->timer_period_low = per2;
+        int16_t amp_multiplier = ((int32_t)amp_env_value * amp_lfo_value) >> 16;
+        osc->amplitude = ((int32_t)amp_multiplier * osc->triggered_velocity) >> 15;
     }
 
     // See if any oscillators are outputting
     bool led_on = false;
     for (int i=0; i<N_VOICES; i++) {
-        led_on = led_on || osc[i].amplitude > 0;
+        led_on = led_on || global.osc[i].amplitude > 0;
     }
 
     if (led_on) {
@@ -645,7 +685,7 @@ static void update_modulation() {
 static void update_output(void) {
     int16_t out = 0;
     for (int i = 0; i < N_VOICES; i++) {
-        out += mixer_inputs[i];
+        out += global.mixer_inputs[i];
     }
     DAC0.DATA = 127 + (out >> 2);
 }
@@ -653,7 +693,7 @@ static void update_output(void) {
 ISR (TCA0_OVF_vect) 
 {
     TCA0.SINGLE.INTFLAGS |= TCA_SINGLE_OVF_bm;
-    if (osc_handle_timer(&osc[0], &mixer_inputs[0], &TCA0.SINGLE.PER)) {
+    if (osc_handle_timer(&global.osc[0], &global.mixer_inputs[0], &TCA0.SINGLE.PER)) {
         update_output();
     }
 }
@@ -661,7 +701,7 @@ ISR (TCA0_OVF_vect)
 ISR (TCB0_INT_vect) 
 {
     TCB0.INTFLAGS |= TCB_CAPT_bm;
-    if (osc_handle_timer(&osc[1], &mixer_inputs[1], &TCB0.CCMP)) {
+    if (osc_handle_timer(&global.osc[1], &global.mixer_inputs[1], &TCB0.CCMP)) {
         update_output();
     }
 }
@@ -669,7 +709,7 @@ ISR (TCB0_INT_vect)
 ISR (TCB1_INT_vect) 
 {
     TCB1.INTFLAGS |= TCB_CAPT_bm;
-    if (osc_handle_timer(&osc[2], &mixer_inputs[2], &TCB1.CCMP)) {
+    if (osc_handle_timer(&global.osc[2], &global.mixer_inputs[2], &TCB1.CCMP)) {
         update_output();
     }
 }
