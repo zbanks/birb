@@ -31,6 +31,16 @@ static int8_t sadd(int8_t x, int8_t y) {
     }
 }
 
+struct adsr_config {
+    int16_t initial_value;
+    int16_t a_incr;
+    int16_t a_value;
+    int16_t d_incr;
+    int16_t s_value;
+    int16_t r_incr;
+    int16_t final_value;
+};
+
 struct adsr_state {
     enum {
         ADSR_OFF,
@@ -39,51 +49,47 @@ struct adsr_state {
         ADSR_SUSTAIN,
         ADSR_RELEASE,
     } mode;
-    int16_t initial_value;
-    int16_t a_incr;
-    int16_t a_value;
-    int16_t d_incr;
-    int16_t s_value;
-    int16_t r_incr;
-    int16_t final_value;
     int16_t output;
     uint8_t last_gate;
 };
 
-static void adsr_init(struct adsr_state *state, int8_t initial_value, int8_t a_time, int8_t a_value, int8_t d_time, int8_t s_value, int8_t r_time, int8_t final_value) {
-    state->mode = ADSR_OFF;
-    state->initial_value = initial_value;
+static void adsr_configure(struct adsr_config *config, int16_t initial_value, int16_t a_time, int16_t a_value, int16_t d_time, int16_t s_value, int16_t r_time, int16_t final_value) {
+    config->initial_value = initial_value;
     if (a_time <= 0) {
         a_time = 1;
     }
-    state->a_incr = (a_value - initial_value) / a_time;
-    if (state->a_incr == 0) {
-        state->a_incr = a_value > initial_value ? 1 : -1;
+    config->a_incr = (a_value - initial_value) / a_time;
+    if (config->a_incr == 0) {
+        config->a_incr = a_value > initial_value ? 1 : -1;
     }
-    state->a_value = a_value;
+    config->a_value = a_value;
     if (d_time <= 0) {
         d_time = 1;
     }
-    state->d_incr = (s_value - a_value) / d_time;
-    if (state->d_incr == 0) {
-        state->d_incr = s_value > a_value ? 1 : -1;
+    config->d_incr = (s_value - a_value) / d_time;
+    if (config->d_incr == 0) {
+        config->d_incr = s_value > a_value ? 1 : -1;
     }
-    state->s_value = s_value;
+    config->s_value = s_value;
     if (r_time <= 0) {
         r_time = 1;
     }
-    state->r_incr = (final_value - s_value) / r_time;
-    if (state->r_incr == 0) {
-        state->r_incr = final_value > s_value ? 1 : -1;
+    config->r_incr = (final_value - s_value) / r_time;
+    if (config->r_incr == 0) {
+        config->r_incr = final_value > s_value ? 1 : -1;
     }
-    state->final_value = final_value;
-    state->output = final_value;
+    config->final_value = final_value;
+}
+
+static void adsr_init(struct adsr_state *state, const struct adsr_config *config) {
+    state->mode = ADSR_OFF;
+    state->output = config->final_value;
     state->last_gate = 0;
 }
 
-static uint8_t adsr_update(struct adsr_state *state, uint8_t gate) {
+static int16_t adsr_update(struct adsr_state *state, const struct adsr_config *config, uint8_t gate) {
     if ((state->mode == ADSR_OFF || state->mode == ADSR_RELEASE || gate != state->last_gate) && gate) {
-        state->output = state->initial_value;
+        state->output = config->initial_value;
         state->mode = ADSR_ATTACK;
     } else if (!gate) {
         state->mode = ADSR_RELEASE;
@@ -94,30 +100,30 @@ static uint8_t adsr_update(struct adsr_state *state, uint8_t gate) {
         case ADSR_SUSTAIN:
             break;
         case ADSR_ATTACK:
-            if ((state->a_incr > 0 && state->output >= state->a_value - state->a_incr)
-             || (state->a_incr < 0 && state->output <= state->a_value - state->a_incr)) {
-                state->output = state->a_value;
+            if ((config->a_incr > 0 && state->output >= config->a_value - config->a_incr)
+             || (config->a_incr < 0 && state->output <= config->a_value - config->a_incr)) {
+                state->output = config->a_value;
                 state->mode = ADSR_DECAY;
             } else {
-                state->output += state->a_incr;
+                state->output += config->a_incr;
             }
             break;
         case ADSR_DECAY:
-            if ((state->d_incr > 0 && state->output >= state->s_value - state->d_incr)
-             || (state->d_incr < 0 && state->output <= state->s_value - state->d_incr)) {
-                state->output = state->s_value;
+            if ((config->d_incr > 0 && state->output >= config->s_value - config->d_incr)
+             || (config->d_incr < 0 && state->output <= config->s_value - config->d_incr)) {
+                state->output = config->s_value;
                 state->mode = ADSR_SUSTAIN;
             } else {
-                state->output += state->d_incr;
+                state->output += config->d_incr;
             }
             break;
         case ADSR_RELEASE:
-            if ((state->r_incr > 0 && state->output >= state->final_value - state->r_incr)
-             || (state->r_incr < 0 && state->output <= state->final_value - state->r_incr)) {
-                state->output = state->final_value;
+            if ((config->r_incr > 0 && state->output >= config->final_value - config->r_incr)
+             || (config->r_incr < 0 && state->output <= config->final_value - config->r_incr)) {
+                state->output = config->final_value;
                 state->mode = ADSR_OFF;
             } else {
-                state->output += state->r_incr;
+                state->output += config->r_incr;
             }
             break;
     }
@@ -180,9 +186,9 @@ static uint8_t rand() {
     static uint8_t c;
 
     x++;               //x is incremented every round and is not affected by any other variable
-    a = (a^c^x);       //note the mix of addition and XOR
-    b = (b+a);         //And the use of very few instructions
-    c = (c+(b>>1)^a);  //the right shift is to ensure that high-order bits from b can affect  
+    a = a^c^x;       //note the mix of addition and XOR
+    b = b+a;         //And the use of very few instructions
+    c = (c+(b>>1))^a;  //the right shift is to ensure that high-order bits from b can affect  
     return c;          //low order bits of other variables
 }
 
@@ -258,34 +264,6 @@ static void rx(uint8_t byte) {
     }
 }
 
-static void check_notes();
-
-static void note_on(uint8_t k, uint8_t v) {
-    if (v == 0) {
-        note_off(k);
-        return;
-    }
-
-    for (int i = 0; i < N_VOICES; i++) {
-        if (note_velocity[i] == 0) {
-            note_index[i] = k;
-            note_velocity[i] = v;
-            check_notes();
-            return;
-        }
-    }
-}
-
-static void note_off(uint8_t k) {
-    for (int i = 0; i < N_VOICES; i++) {
-        if (note_index[i] == k && note_velocity[i] > 0) {
-            note_velocity[i] = 0;
-            check_notes();
-            return;
-        }
-    }
-}
-
 ISR (USART0_RXC_vect) 
 {
     rx(USART0.RXDATAL);
@@ -305,19 +283,25 @@ struct osc_state {
     uint16_t timer_period_low;
     uint8_t t;
 
-    // Input stuff
-    uint8_t amplitude;
+    uint8_t triggered_note;
+    uint8_t triggered_velocity;
+
+    struct adsr_state amp_env;
+
+    // Output stuff
+    int8_t amplitude;
 };
 
-static void osc_init(struct osc_state *state) {
+static void osc_init(struct osc_state *state, const struct adsr_config *amp_env_config) {
     state->prescaler = 0;
     state->timer_period_high = 1250;
     state->timer_period_low = 1250;
     state->t = 0;
     state->amplitude = 0;
+    adsr_init(&state->amp_env, amp_env_config);
 }
 
-static bool osc_handle_timer(struct osc_state *state, uint8_t *out, uint16_t *next_period) {
+static bool osc_handle_timer(struct osc_state *state, int8_t *out, volatile uint16_t *next_period) {
     // Returns the output signal level
     // and updates next_period with the time until this function should be called next
 
@@ -329,7 +313,7 @@ static bool osc_handle_timer(struct osc_state *state, uint8_t *out, uint16_t *ne
     }
 
     *next_period = (state->t & 1) ? state->timer_period_high : state->timer_period_low;
-    *out = (state->t & 1) ? state->amplitude : 0;
+    *out = (state->t & 1) ? state->amplitude : -state->amplitude;
     state->t++;
     return true;
 }
@@ -353,8 +337,20 @@ static uint16_t period(int16_t note) {
 
 #define MIN_PER 10
 
-static void osc_handle_note(struct osc_state *state, uint8_t note, uint8_t velocity, uint8_t detune_lfo_value) {
-    uint16_t output_period = period(note << 8);
+static void osc_handle_note(struct osc_state *state, uint8_t note, uint8_t velocity, uint8_t detune_lfo_value, const struct adsr_config *amp_env_config) {
+    // Store triggered velocity
+    uint8_t gate = 0;
+    if (velocity > 0) {
+        state->triggered_note = note;
+        state->triggered_velocity = velocity;
+        gate = note + 1;
+    }
+
+    // Advance envelope generators and LFOs
+    int16_t amp_env_value = adsr_update(&state->amp_env, amp_env_config, gate);
+
+    // Calculate timer periods
+    uint16_t output_period = period(state->triggered_note << 8);
     if (output_period < 2 * MIN_PER) {
         output_period = MIN_PER;
     }
@@ -367,13 +363,53 @@ static void osc_handle_note(struct osc_state *state, uint8_t note, uint8_t veloc
         per2 = MIN_PER;
         per1 = output_period - MIN_PER;
     }
+
+    // Update state
     state->timer_period_high = per1;
     state->timer_period_low = per2;
-    state->amplitude = velocity << 1;
+    state->amplitude = ((int32_t)amp_env_value * state->triggered_velocity) >> 15;
 }
 
 static struct osc_state osc[N_VOICES];
-static uint8_t mixer_inputs[N_VOICES];
+static int8_t mixer_inputs[N_VOICES];
+static struct adsr_config global_amp_env_config;
+
+static void note_on(uint8_t k, uint8_t v) {
+    if (v == 0) {
+        note_off(k);
+        return;
+    }
+
+    // Look for a free oscillator to use
+    for (int i = 0; i < N_VOICES; i++) {
+        if (note_velocity[i] == 0 && (note_index[i] == k || osc[i].amplitude == 0)) {
+            note_index[i] = k;
+            note_velocity[i] = v;
+            check_notes();
+            return;
+        }
+    }
+    // Look for a releasing note to use
+    for (int i = 0; i < N_VOICES; i++) {
+        if (note_velocity[i] == 0) {
+            note_index[i] = k;
+            note_velocity[i] = v;
+            check_notes();
+            return;
+        }
+    }
+}
+
+static void note_off(uint8_t k) {
+    for (int i = 0; i < N_VOICES; i++) {
+        if (note_index[i] == k && note_velocity[i] > 0) {
+            note_velocity[i] = 0;
+            check_notes();
+            return;
+        }
+    }
+}
+
 
 int
 main (void)
@@ -466,9 +502,11 @@ main (void)
     //triangle_init(&mod_lfo, 0, 0, 10); // XXX
 
     triangle_init(&detune_lfo, 0, 0, 0);
+    //adsr_configure(&global_amp_env_config, 0, 100, 127 << 8, 2000, 100 << 8, 3200, 0);
+    adsr_configure(&global_amp_env_config, 0, 1, 127 << 8, 1, 127 << 8, 100, 0);
 
     for (int i = 0; i < N_VOICES; i++) {
-        osc_init(&osc[i]);
+        osc_init(&osc[i], &global_amp_env_config);
     }
 
     sei();
@@ -499,7 +537,7 @@ static void update_modulation() {
     uint8_t detune_lfo_value = 127 + (triangle_update(&detune_lfo, 1) >> 8);
 
     for (int i=0; i<N_VOICES; i++) {
-        osc_handle_note(&osc[i], note_index[i], note_velocity[i], detune_lfo_value);
+        osc_handle_note(&osc[i], note_index[i], note_velocity[i], detune_lfo_value, &global_amp_env_config);
     }
 
     bool active = false;
@@ -516,11 +554,11 @@ static void update_modulation() {
 }
 
 static void update_output(void) {
-    uint16_t out = 0;
+    int16_t out = 0;
     for (int i = 0; i < N_VOICES; i++) {
         out += mixer_inputs[i];
     }
-    DAC0.DATA = out >> 2;
+    DAC0.DATA = 127 + (out >> 2);
 }
 
 ISR (TCA0_OVF_vect) 
