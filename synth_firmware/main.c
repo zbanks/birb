@@ -202,6 +202,62 @@ static uint8_t rand() {
     return c;          //low order bits of other variables
 }
 
+struct arp_config {
+    const int8_t *notes;
+    uint8_t n_notes;
+    int16_t period;
+};
+
+struct arp_state {
+    uint8_t index;
+    int16_t timer;
+    uint8_t last_gate;
+    int8_t note;
+};
+
+static void arp_configure(struct arp_config *config, const int8_t notes[], uint8_t n_notes, int16_t period) {
+    config->notes = notes;
+    config->n_notes = n_notes;
+    config->period = period;
+}
+
+static void arp_init(struct arp_state *state, const struct arp_config *config) {
+    state->last_gate = 0;
+    state->timer = 0;
+    state->index = 0;
+    if (config->n_notes > 0) {
+        state->note = config->notes[0];
+    } else {
+        state->note = 0;
+    }
+}
+
+static int8_t arp_update(struct arp_state *state, const struct arp_config *config, uint8_t gate) {
+    if (config->n_notes == 0) {
+        // No arpeggiation is configured
+        state->timer = 0;
+        state->index = 0;
+        state->note = 0;
+    } else if (gate && gate != state->last_gate) {
+        // Rising edge on gate
+        state->timer = 0;
+        state->index = 0;
+        state->note = config->notes[0];
+    } else {
+        state->timer++;
+        if (state->timer >= config->period) {
+            // Advance arp
+            state->timer = 0;
+            state->index++;
+            if (state->index >= config->n_notes) {
+                state->index = 0;
+            }
+            state->note = config->notes[state->index];
+        }
+    }
+    state->last_gate = gate;
+    return state->note;
+}
 
 static void rx(uint8_t byte) {
     static enum {
@@ -343,7 +399,7 @@ static struct global_config {
     struct adsr_config pitch_env_config;
     struct triangle_config pitch_lfo_config;
     struct triangle_config pwm_lfo_config;
-    uint16_t arp_period;
+    struct arp_config arp_config;
 } global_config;
 
 static struct global_state {
@@ -352,7 +408,7 @@ static struct global_state {
     struct triangle_state amp_lfo;
     struct triangle_state pitch_lfo;
     struct triangle_state pwm_lfo;
-    int8_t arp_note;
+    struct arp_state arp;
 } global;
 
 static void global_osc_init() {
@@ -505,6 +561,8 @@ static struct knobs {
     uint8_t freq;
 } knobs;
 
+const int8_t arp_octave_notes[] = {-12, 0};
+
 static void init_basic() {
     //adsr_init(&amp_env, 0, 1, 127, 20, 100, 32, 0);
     //adsr_init(&amp_env, 1, 255, 127, 255);
@@ -539,6 +597,11 @@ static void init_basic() {
     const int16_t ov = 200;
     triangle_configure(&global_config.pitch_lfo_config, -ov, ov, 0, ot);
     triangle_init(&global.pitch_lfo, &global_config.pitch_lfo_config);
+
+    //arp_configure(&global_config.arp_config, arp_octave_notes, sizeof (arp_octave_notes), 0);
+    //arp_init(&global.arp, &global_config.arp_config);
+    arp_configure(&global_config.arp_config, NULL, 0, 0);
+    arp_init(&global.arp, &global_config.arp_config);
 }
 
 static void mod_basic() {
@@ -547,6 +610,9 @@ static void mod_basic() {
     global_config.pwm_lfo_config.low = -pwm_amt;
     global_config.pwm_lfo_config.high = pwm_amt;
     global_config.pwm_lfo_config.increment = knobs.depth >> 1;
+
+    // Arp speed based on freq knob
+    global_config.arp_config.period = (int16_t)knobs.freq * 10;
 }
 
 static const struct patches {
@@ -668,32 +734,8 @@ static void update_modulation() {
     // Advance global pitch LFO
     int16_t pitch_lfo_value = triangle_update(&global.pitch_lfo, &global_config.pitch_lfo_config, notes_held);
 
-    // Advance arp, if appropriate
-    global_config.arp_period = (int16_t)knobs.freq * 10;
-    uint8_t arp_gate = notes_held;
-    static uint8_t last_arp_gate;
-    static uint16_t arp_timer;
-    static uint16_t arp_index;
-    if (arp_gate && arp_gate != last_arp_gate) {
-        arp_timer = 0;
-        arp_index = 0;
-    }
-    //static int8_t arp_note;
-    if (arp_gate) {
-        arp_timer++;
-        if (arp_timer > global_config.arp_period) {
-            arp_timer = 0;
-            // Advance arp
-            //int8_t new_note = arp_note;
-            //while (new_note == arp_note) new_note = (rand() & 7) - 4;
-            //arp_note = new_note;
-            arp_index++;
-        }
-    }
-    last_arp_gate = arp_gate;
-    // End arp
-
-    global.arp_note = -12 + (arp_index & 1) * 12;
+    // Advance arp
+    int8_t arp_note = arp_update(&global.arp, &global_config.arp_config, notes_held);
 
     // Advance each oscillator
     for (int i=0; i<N_VOICES; i++) {
@@ -715,7 +757,7 @@ static void update_modulation() {
         int16_t pitch_adjust = ((int32_t)pitch_env_value * pitch_lfo_value) >> 15;
 
         // Calculate timer periods
-        uint16_t output_period = period(((osc->triggered_note + global.arp_note) << 8) + pitch_adjust);
+        uint16_t output_period = period(((osc->triggered_note + arp_note) << 8) + pitch_adjust);
         if (output_period < 2 * MIN_PER) {
             output_period = MIN_PER;
         }
