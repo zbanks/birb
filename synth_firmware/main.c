@@ -16,6 +16,8 @@ static void note_on(uint8_t k, uint8_t v);
 static void note_off(uint8_t k);
 
 #define N_VOICES 3
+#define N_SELECTOR_POSITIONS 12
+
 static uint8_t note_index[N_VOICES];
 static uint8_t note_velocity[N_VOICES];
 
@@ -430,7 +432,7 @@ static void note_on(uint8_t k, uint8_t v) {
         return;
     }
 
-     uint8_t n_voices = poly ? N_VOICES : 1;
+    uint8_t n_voices = poly ? N_VOICES : 1;
 
     // Look for a free oscillator to use
     for (int i = 0; i < n_voices; i++) {
@@ -463,6 +465,13 @@ static void note_off(uint8_t k) {
             return;
         }
     }
+}
+
+static void all_notes_off() {
+    for (int i = 0; i < N_VOICES; i++) {
+        note_velocity[i] = 0;
+    }
+    check_notes();
 }
 
 
@@ -543,8 +552,6 @@ main (void)
     USART0.CTRLA |= USART_RXCIE_bm; // Receive data interrupt enable
 	USART0.CTRLB |= USART_RXEN_bm | USART_TXEN_bm;	// Enable rx and tx
 
-    global_osc_init();
-
     sei();
 
     for(;;) {
@@ -564,19 +571,19 @@ static struct knobs {
 
 static void init_basic() {
     // No PWM
-    triangle_configure(&global_config.pwm_lfo_config, 0, 0, 0, 0);
+    triangle_configure(&global_config.pwm_lfo_config, 0, 0, 0, 1);
     triangle_init(&global.pwm_lfo, &global_config.pwm_lfo_config);
 
     // Basic amplitude envelope, no amplitude LFO
     adsr_configure(&global_config.amp_env_config, 0, 1, 127 << 8, 1, 127 << 8, 100, 0);
     global_config.amp_env_config.s_value = 0;
-    triangle_configure(&global_config.amp_lfo_config, 0, 0, 0, 0);
+    triangle_configure(&global_config.amp_lfo_config, 0, 0, 0, 1);
     triangle_init(&global.amp_lfo, &global_config.amp_lfo_config);
 
     // Add some vibrato
     const int16_t et = 6000;
     const int16_t ev = 6000;
-    adsr_configure(&global_config.pitch_env_config, 0, et, ev, 0, ev, 0, ev);
+    adsr_configure(&global_config.pitch_env_config, 0, et, ev, 1, ev, 1, 0);
     const int16_t ot = 400;
     const int16_t ov = 200;
     triangle_configure(&global_config.pitch_lfo_config, -ov, ov, 0, ot);
@@ -593,10 +600,68 @@ static void mod_basic() {
     global_config.amp_env_config.s_value = knobs.depth < 255 ? 0 : 127 << 8;
 
     // Vibrato speed and amount based on freq knob
-    int16_t vibrato_amt = (knobs.freq < 60 ? knobs.freq : 60) << 4;
+    int16_t vibrato_amt = knobs.freq << 4;
     global_config.pitch_lfo_config.low = -vibrato_amt;
     global_config.pitch_lfo_config.high = vibrato_amt;
-    global_config.pitch_lfo_config.increment = knobs.freq >> 3;
+    global_config.pitch_lfo_config.increment = ((uint16_t)knobs.freq * knobs.freq) >> 11;
+}
+
+static void init_chorus() {
+    // No PWM
+    triangle_configure(&global_config.pwm_lfo_config, 0, 0, 0, 1);
+    triangle_init(&global.pwm_lfo, &global_config.pwm_lfo_config);
+
+    // Basic amplitude envelope
+    adsr_configure(&global_config.amp_env_config, 0, 1, 127 << 8, 1000, 63 << 8, 100, 0);
+
+    // Amplitude LFO set up in mod function
+    triangle_configure(&global_config.amp_lfo_config, 0, 0, 0, 1);
+    triangle_init(&global.amp_lfo, &global_config.amp_lfo_config);
+
+    // No pitch LFO
+    adsr_configure(&global_config.pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
+    triangle_configure(&global_config.pitch_lfo_config, 0, 0, 0, 1);
+    triangle_init(&global.pitch_lfo, &global_config.pitch_lfo_config);
+
+    // No arp
+    arp_configure(&global_config.arp_config, NULL, 0, 0);
+    arp_init(&global.arp, &global_config.arp_config);
+}
+
+static void mod_chorus() {
+    // Detune based on depth knob
+    int16_t pwm_amt = (knobs.depth < 12 ? knobs.depth : 12) << 10;
+    global_config.pwm_lfo_config.low = -pwm_amt;
+    global_config.pwm_lfo_config.high = pwm_amt;
+    global_config.pwm_lfo_config.increment = knobs.depth >> 1;
+
+    global_config.amp_env_config.a_value = (64 + knobs.depth >> 2) << 8;
+
+    // Tremolo speed and amount based on freq knob
+    int16_t tremolo_amt = (knobs.freq < 127 ? knobs.freq : 127) << 7;
+    global_config.amp_lfo_config.low = -tremolo_amt;
+    global_config.amp_lfo_config.high = tremolo_amt;
+    global_config.amp_lfo_config.increment = ((uint16_t)knobs.freq * knobs.freq) >> 8;
+}
+
+static void init_empty() {
+    triangle_configure(&global_config.pwm_lfo_config, 0, 0, 0, 1);
+    triangle_init(&global.pwm_lfo, &global_config.pwm_lfo_config);
+
+    adsr_configure(&global_config.amp_env_config, 0, 1, 0, 1, 0, 1, 0);
+    global_config.amp_env_config.s_value = 0;
+    triangle_configure(&global_config.amp_lfo_config, 0, 0, 0, 1);
+    triangle_init(&global.amp_lfo, &global_config.amp_lfo_config);
+
+    adsr_configure(&global_config.pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
+    triangle_configure(&global_config.pitch_lfo_config, 0, 0, 0, 1);
+    triangle_init(&global.pitch_lfo, &global_config.pitch_lfo_config);
+
+    arp_configure(&global_config.arp_config, NULL, 0, 0);
+    arp_init(&global.arp, &global_config.arp_config);
+}
+
+static void mod_empty() {
 }
 /*
 
@@ -655,54 +720,54 @@ static void mod_basic() {
 static const struct patches {
     void (*init_fn)();
     void (*mod_fn)();
-} patches[12] = {
+} patches[N_SELECTOR_POSITIONS] = {
     {
         .init_fn = init_basic,
         .mod_fn = mod_basic,
     },
     {
-        .init_fn = init_basic,
-        .mod_fn = mod_basic,
+        .init_fn = init_chorus,
+        .mod_fn = mod_chorus,
     },
     {
-        .init_fn = init_basic,
-        .mod_fn = mod_basic,
+        .init_fn = init_empty,
+        .mod_fn = mod_empty,
     },
     {
-        .init_fn = init_basic,
-        .mod_fn = mod_basic,
+        .init_fn = init_empty,
+        .mod_fn = mod_empty,
     },
     {
-        .init_fn = init_basic,
-        .mod_fn = mod_basic,
+        .init_fn = init_empty,
+        .mod_fn = mod_empty,
     },
     {
-        .init_fn = init_basic,
-        .mod_fn = mod_basic,
+        .init_fn = init_empty,
+        .mod_fn = mod_empty,
     },
     {
-        .init_fn = init_basic,
-        .mod_fn = mod_basic,
+        .init_fn = init_empty,
+        .mod_fn = mod_empty,
     },
     {
-        .init_fn = init_basic,
-        .mod_fn = mod_basic,
+        .init_fn = init_empty,
+        .mod_fn = mod_empty,
     },
     {
-        .init_fn = init_basic,
-        .mod_fn = mod_basic,
+        .init_fn = init_empty,
+        .mod_fn = mod_empty,
     },
     {
-        .init_fn = init_basic,
-        .mod_fn = mod_basic,
+        .init_fn = init_empty,
+        .mod_fn = mod_empty,
     },
     {
-        .init_fn = init_basic,
-        .mod_fn = mod_basic,
+        .init_fn = init_empty,
+        .mod_fn = mod_empty,
     },
     {
-        .init_fn = init_basic,
-        .mod_fn = mod_basic,
+        .init_fn = init_empty,
+        .mod_fn = mod_empty,
     },
 };
 
@@ -731,7 +796,7 @@ static void read_knobs() {
     ADC0.COMMAND |= ADC_STCONV_bm;
     while (ADC0.COMMAND & ADC_STCONV_bm);
     uint8_t read_select = ADC0.RES >> 6;
-    if (read_select > 12) read_select = 12;
+    if (read_select >= N_SELECTOR_POSITIONS) read_select = N_SELECTOR_POSITIONS - 1;
 
     if (read_depth != last_depth) {
         last_depth = read_depth;
@@ -744,12 +809,11 @@ static void read_knobs() {
     if (read_select != last_select) {
         last_select = read_select;
         knobs.select = read_select;
+        all_notes_off();
+        global_osc_init();
         patch_init();
     }
 }
-
-uint8_t depth;
-uint8_t freq;
 
 // Update modulation
 static void update_modulation() {
