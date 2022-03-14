@@ -4,6 +4,7 @@
 #include <avr/interrupt.h>
 #include <util/delay.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
 #define MIDI_CHANNEL 0
 
@@ -189,7 +190,7 @@ static int16_t triangle_update(struct triangle_state *state, const struct triang
     return state->output;
 }
 
-static uint8_t rand() {
+static uint8_t rand8() {
     static uint8_t x;
     static uint8_t a;
     static uint8_t b;
@@ -561,9 +562,45 @@ static struct knobs {
     uint8_t freq;
 } knobs;
 
-const int8_t arp_octave_notes[] = {-12, 0};
-
 static void init_basic() {
+    // No PWM
+    triangle_configure(&global_config.pwm_lfo_config, 0, 0, 0, 0);
+    triangle_init(&global.pwm_lfo, &global_config.pwm_lfo_config);
+
+    // Basic amplitude envelope, no amplitude LFO
+    adsr_configure(&global_config.amp_env_config, 0, 1, 127 << 8, 1, 127 << 8, 100, 0);
+    global_config.amp_env_config.s_value = 0;
+    triangle_configure(&global_config.amp_lfo_config, 0, 0, 0, 0);
+    triangle_init(&global.amp_lfo, &global_config.amp_lfo_config);
+
+    // Add some vibrato
+    const int16_t et = 6000;
+    const int16_t ev = 6000;
+    adsr_configure(&global_config.pitch_env_config, 0, et, ev, 0, ev, 0, ev);
+    const int16_t ot = 400;
+    const int16_t ov = 200;
+    triangle_configure(&global_config.pitch_lfo_config, -ov, ov, 0, ot);
+    triangle_init(&global.pitch_lfo, &global_config.pitch_lfo_config);
+
+    // No arp
+    arp_configure(&global_config.arp_config, NULL, 0, 0);
+    arp_init(&global.arp, &global_config.arp_config);
+}
+
+static void mod_basic() {
+    // Decay based on depth knob
+    global_config.amp_env_config.d_incr = -(knobs.depth < 127 ? (144 - knobs.depth) : (255 - knobs.depth) >> 3);
+    global_config.amp_env_config.s_value = knobs.depth < 255 ? 0 : 127 << 8;
+
+    // Vibrato speed and amount based on freq knob
+    int16_t vibrato_amt = (knobs.freq < 60 ? knobs.freq : 60) << 4;
+    global_config.pitch_lfo_config.low = -vibrato_amt;
+    global_config.pitch_lfo_config.high = vibrato_amt;
+    global_config.pitch_lfo_config.increment = knobs.freq >> 3;
+}
+/*
+
+const int8_t arp_octave_notes[] = {-12, 0};
     //adsr_init(&amp_env, 0, 1, 127, 20, 100, 32, 0);
     //adsr_init(&amp_env, 1, 255, 127, 255);
     //triangle_init(&amp_lfo, -100, 100, 30);
@@ -602,7 +639,6 @@ static void init_basic() {
     //arp_init(&global.arp, &global_config.arp_config);
     arp_configure(&global_config.arp_config, NULL, 0, 0);
     arp_init(&global.arp, &global_config.arp_config);
-}
 
 static void mod_basic() {
     // Detune based on depth knob
@@ -614,6 +650,7 @@ static void mod_basic() {
     // Arp speed based on freq knob
     global_config.arp_config.period = (int16_t)knobs.freq * 10;
 }
+*/
 
 static const struct patches {
     void (*init_fn)();
