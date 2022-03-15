@@ -388,7 +388,7 @@ static uint16_t period(int16_t note) {
     if (adj_note > (126 << 8)) { // Highest note to avoid deadlock
         adj_note = (126 << 8);
     }
-    uint8_t ix = note >> 8;
+    uint8_t ix = adj_note >> 8;
     uint16_t per_low = PERIOD_LKUP[ix];
     uint16_t per_high = PERIOD_LKUP[ix + 1];
     uint8_t frac = adj_note & 0xFF;
