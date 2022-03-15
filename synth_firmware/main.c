@@ -7,6 +7,8 @@
 #include <stdlib.h>
 
 #define MIDI_CHANNEL 0
+#define PRESCALER 4
+#define OCTAVE_OFFSET -2
 
 // This lkup uses 16 counts per period
 const uint16_t PERIOD_LKUP[] = {
@@ -155,7 +157,7 @@ static void triangle_configure(struct triangle_config *config, int16_t low, int1
     if (period == 0) {
         period = 1;
     }
-    config->increment = (high - low) / period;
+    config->increment = ((uint16_t)high - (uint16_t)low) / period;
     if (config->increment == 0) {
         config->increment = 1;
     }
@@ -364,7 +366,7 @@ static bool osc_handle_timer(struct osc_state *state, int8_t *out, volatile uint
     // Returns the output signal level
     // and updates next_period with the time until this function should be called next
 
-    if (state->prescaler > 4) {
+    if (state->prescaler > PRESCALER) {
         state->prescaler = 0;
     } else {
         state->prescaler++;
@@ -378,23 +380,24 @@ static bool osc_handle_timer(struct osc_state *state, int8_t *out, volatile uint
 }
 
 static uint16_t period(int16_t note) {
+    int16_t adj_note = note + (((OCTAVE_OFFSET) * 12) << 8);
     // Set osc as per new note
-    if (note < 0) { // Highest note to avoid deadlock
-        note = 0;
+    if (adj_note < 0) { // Highest note to avoid deadlock
+        adj_note = 0;
     }
-    if (note > (100 << 8)) { // Highest note to avoid deadlock
-        note = (100 << 8);
+    if (adj_note > (126 << 8)) { // Highest note to avoid deadlock
+        adj_note = (126 << 8);
     }
     uint8_t ix = note >> 8;
     uint16_t per_low = PERIOD_LKUP[ix];
     uint16_t per_high = PERIOD_LKUP[ix + 1];
-    uint8_t frac = note & 0xFF;
+    uint8_t frac = adj_note & 0xFF;
     uint16_t per = ((uint32_t)per_low * (256 - frac) + (uint32_t)per_high * frac) >> 8;
     return per;
 }
 
 
-#define MIN_PER 10
+#define MIN_PER 300
 
 static struct global_config {
     struct adsr_config amp_env_config;
@@ -575,7 +578,7 @@ static void init_basic() {
     triangle_init(&global.pwm_lfo, &global_config.pwm_lfo_config);
 
     // Basic amplitude envelope, no amplitude LFO
-    adsr_configure(&global_config.amp_env_config, 0, 1, 127 << 8, 1, 127 << 8, 100, 0);
+    adsr_configure(&global_config.amp_env_config, 0, 1, 64 << 8, 1, 64 << 8, 100, 0);
     global_config.amp_env_config.s_value = 0;
     triangle_configure(&global_config.amp_lfo_config, 0, 0, 0, 1);
     triangle_init(&global.amp_lfo, &global_config.amp_lfo_config);
@@ -597,7 +600,7 @@ static void init_basic() {
 static void mod_basic() {
     // Decay based on depth knob
     global_config.amp_env_config.d_incr = -(knobs.depth < 127 ? (144 - knobs.depth) : (255 - knobs.depth) >> 3);
-    global_config.amp_env_config.s_value = knobs.depth < 255 ? 0 : 127 << 8;
+    global_config.amp_env_config.s_value = knobs.depth < 255 ? 0 : 64 << 8;
 
     // Vibrato speed and amount based on freq knob
     int16_t vibrato_amt = knobs.freq << 4;
@@ -629,19 +632,55 @@ static void init_chorus() {
 }
 
 static void mod_chorus() {
-    // Detune based on depth knob
+    // PWM based on depth knob
     int16_t pwm_amt = (knobs.depth < 12 ? knobs.depth : 12) << 10;
     global_config.pwm_lfo_config.low = -pwm_amt;
     global_config.pwm_lfo_config.high = pwm_amt;
     global_config.pwm_lfo_config.increment = knobs.depth >> 1;
 
-    global_config.amp_env_config.a_value = (64 + knobs.depth >> 2) << 8;
+    global_config.amp_env_config.a_value = (64 + (knobs.depth >> 2)) << 8;
 
     // Tremolo speed and amount based on freq knob
     int16_t tremolo_amt = (knobs.freq < 127 ? knobs.freq : 127) << 7;
     global_config.amp_lfo_config.low = -tremolo_amt;
     global_config.amp_lfo_config.high = tremolo_amt;
     global_config.amp_lfo_config.increment = ((uint16_t)knobs.freq * knobs.freq) >> 8;
+}
+
+static void init_wave() {
+    // Constant PWM
+    //triangle_configure(&global_config.pwm_lfo_config, 0, -96 << 8, 96 << 8, 10000);
+    triangle_configure(&global_config.pwm_lfo_config, -120 << 8, 120 << 8, -120 << 8, 800);
+    triangle_init(&global.pwm_lfo, &global_config.pwm_lfo_config);
+
+    // Basic amplitude envelope
+    adsr_configure(&global_config.amp_env_config, 0, 1, 127 << 8, 1000, 63 << 8, 100, 0);
+
+    // Basic amplitude envelope, no amplitude LFO
+    adsr_configure(&global_config.amp_env_config, 0, 100, 64 << 8, 1, 64 << 8, 100, 0);
+    triangle_configure(&global_config.amp_lfo_config, 0, 0, 0, 1);
+    triangle_init(&global.amp_lfo, &global_config.amp_lfo_config);
+
+    // No pitch LFO
+    adsr_configure(&global_config.pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
+    triangle_configure(&global_config.pitch_lfo_config, 0, 0, 0, 1);
+    triangle_init(&global.pitch_lfo, &global_config.pitch_lfo_config);
+
+    // No arp
+    arp_configure(&global_config.arp_config, NULL, 0, 0);
+    arp_init(&global.arp, &global_config.arp_config);
+}
+
+static void mod_wave() {
+    // Release based on depth knob
+    //global_config.amp_env_config.a_incr = (knobs.depth < 127 ? knobs.depth : 127) << 2;
+    uint16_t inv_knob = 255 - knobs.freq;
+    global_config.amp_env_config.r_incr = -(((inv_knob * inv_knob) >> 11) + 1);
+
+    global_config.pwm_lfo_config.high = (((int16_t)-120 << 7) + (int16_t)knobs.depth * (240 >> 1)) << 1;
+    global_config.pwm_lfo_config.initial_value = (global_config.pwm_lfo_config.low + global_config.pwm_lfo_config.high) >> 1;
+    //global_config.pwm_lfo_config.increment = ((uint16_t)knobs.depth * knobs.depth) >> 11;
+    global_config.pwm_lfo_config.increment = knobs.depth >> 3;
 }
 
 static void init_empty() {
@@ -730,8 +769,8 @@ static const struct patches {
         .mod_fn = mod_chorus,
     },
     {
-        .init_fn = init_empty,
-        .mod_fn = mod_empty,
+        .init_fn = init_wave,
+        .mod_fn = mod_wave,
     },
     {
         .init_fn = init_empty,
@@ -860,7 +899,7 @@ static void update_modulation() {
         // Calculate timer periods
         uint16_t output_period = period(((osc->triggered_note + arp_note) << 8) + pitch_adjust);
         if (output_period < 2 * MIN_PER) {
-            output_period = MIN_PER;
+            output_period = 2 * MIN_PER;
         }
         uint16_t per1 = ((uint32_t)output_period * pwm_lfo_value) >> 8;
         uint16_t per2 = output_period - per1;
@@ -872,11 +911,13 @@ static void update_modulation() {
             per1 = output_period - MIN_PER;
         }
 
+        int8_t adjusted_velocity = 64 + (osc->triggered_velocity >> 1);
+
         // Update low-level osc state
+        int16_t amp_multiplier = ((int32_t)amp_env_value * amp_lfo_value) >> 16;
         osc->timer_period_high = per1;
         osc->timer_period_low = per2;
-        int16_t amp_multiplier = ((int32_t)amp_env_value * amp_lfo_value) >> 16;
-        osc->amplitude = ((int32_t)amp_multiplier * osc->triggered_velocity) >> 15;
+        osc->amplitude = ((int32_t)amp_multiplier * adjusted_velocity) >> 15;
     }
 
     // See if any oscillators are outputting
