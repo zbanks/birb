@@ -359,6 +359,12 @@ struct osc_state {
     uint8_t triggered_note;
     uint8_t triggered_velocity;
 
+    struct adsr_config amp_env_config;
+    struct triangle_config amp_lfo_config;
+    struct adsr_config pitch_env_config;
+    struct triangle_config pitch_lfo_config;
+    struct triangle_config pwm_lfo_config;
+
     struct adsr_state amp_env;
     struct triangle_state amp_lfo;
     struct adsr_state pitch_env;
@@ -373,11 +379,6 @@ struct osc_state {
 
 static struct global_config {
     enum mode mode;
-    struct adsr_config amp_env_config;
-    struct triangle_config amp_lfo_config;
-    struct adsr_config pitch_env_config;
-    struct triangle_config pitch_lfo_config;
-    struct triangle_config pwm_lfo_config;
     struct arp_config arp_config;
 } global_config;
 
@@ -428,11 +429,11 @@ static void global_osc_init() {
         global.osc[i].timer_period_low = 1250;
         global.osc[i].t = 0;
         global.osc[i].amplitude = 0;
-        adsr_init(&global.osc[i].amp_env, &global_config.amp_env_config);
-        triangle_init(&global.osc[i].amp_lfo, &global_config.amp_lfo_config);
-        adsr_init(&global.osc[i].pitch_env, &global_config.pitch_env_config);
-        triangle_init(&global.osc[i].pitch_lfo, &global_config.pitch_lfo_config);
-        triangle_init(&global.osc[i].pwm_lfo, &global_config.pwm_lfo_config);
+        adsr_init(&global.osc[i].amp_env, &global.osc[i].amp_env_config);
+        triangle_init(&global.osc[i].amp_lfo, &global.osc[i].amp_lfo_config);
+        adsr_init(&global.osc[i].pitch_env, &global.osc[i].pitch_env_config);
+        triangle_init(&global.osc[i].pitch_lfo, &global.osc[i].pitch_lfo_config);
+        triangle_init(&global.osc[i].pwm_lfo, &global.osc[i].pwm_lfo_config);
     }
 }
 
@@ -648,154 +649,195 @@ static struct knobs {
 static void init_basic() {
     global_config.mode = MODE_POLY;
 
-    // No PWM
-    triangle_configure(&global_config.pwm_lfo_config, 0, 0, 0, 1);
+    for (int i=0; i<N_VOICES; i++) {
+        struct osc_state *osc = &global.osc[i];
+        // No PWM
+        triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
 
-    // Basic amplitude envelope, no amplitude LFO
-    adsr_configure(&global_config.amp_env_config, 0, 1, 64 << 8, 1, 64 << 8, 100, 0);
-    global_config.amp_env_config.s_value = 0;
-    triangle_configure(&global_config.amp_lfo_config, 0, 0, 0, 1);
+        // Basic amplitude envelope, no amplitude LFO
+        adsr_configure(&osc->amp_env_config, 0, 1, 64 << 8, 1, 64 << 8, 100, 0);
+        osc->amp_env_config.s_value = 0;
+        triangle_configure(&osc->amp_lfo_config, 0, 0, 0, 1);
 
-    // Add some vibrato
-    const int16_t et = 6000;
-    const int16_t ev = 6000;
-    adsr_configure(&global_config.pitch_env_config, 0, et, ev, 1, ev, 1, 0);
-    const int16_t ot = 400;
-    const int16_t ov = 200;
-    triangle_configure(&global_config.pitch_lfo_config, -ov, ov, 0, ot);
+        // Add some vibrato
+        const int16_t et = 6000;
+        const int16_t ev = 6000;
+        adsr_configure(&osc->pitch_env_config, 0, et, ev, 1, ev, 1, 0);
+        const int16_t ot = 400;
+        const int16_t ov = 200;
+        triangle_configure(&osc->pitch_lfo_config, -ov, ov, 0, ot);
+    }
 
     // No arp
     arp_configure(&global_config.arp_config, NULL, 0, 0);
 }
 
 static void mod_basic() {
-    // Decay based on depth knob
-    global_config.amp_env_config.d_incr = -(knobs.depth < 127 ? (144 - knobs.depth) : (255 - knobs.depth) >> 3);
-    global_config.amp_env_config.s_value = knobs.depth < 255 ? 0 : 64 << 8;
+    for (int i=0; i<N_VOICES; i++) {
+        struct osc_state *osc = &global.osc[i];
+        // Decay based on depth knob
+        osc->amp_env_config.d_incr = -(knobs.depth < 127 ? (144 - knobs.depth) : (255 - knobs.depth) >> 3);
+        osc->amp_env_config.s_value = knobs.depth < 255 ? 0 : 64 << 8;
 
-    // Vibrato speed and amount based on freq knob
-    int16_t vibrato_amt = knobs.freq << 4;
-    global_config.pitch_lfo_config.low = -vibrato_amt;
-    global_config.pitch_lfo_config.high = vibrato_amt;
-    global_config.pitch_lfo_config.increment = ((uint16_t)knobs.freq * knobs.freq) >> 11;
+        // Vibrato speed and amount based on freq knob
+        int16_t vibrato_amt = knobs.freq << 4;
+        osc->pitch_lfo_config.low = -vibrato_amt;
+        osc->pitch_lfo_config.high = vibrato_amt;
+        osc->pitch_lfo_config.increment = ((uint16_t)knobs.freq * knobs.freq) >> 11;
+    }
 }
 
 static void init_chorus() {
     global_config.mode = MODE_POLY;
 
-    // No PWM
-    triangle_configure(&global_config.pwm_lfo_config, 0, 0, 0, 1);
+    for (int i = 0; i < N_VOICES; i++) {
+        struct osc_state *osc = &global.osc[i];
+        // No PWM
+        triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
 
-    // Basic amplitude envelope
-    adsr_configure(&global_config.amp_env_config, 0, 1, 127 << 8, 1000, 63 << 8, 100, 0);
+        // Basic amplitude envelope
+        adsr_configure(&osc->amp_env_config, 0, 1, 127 << 8, 1000, 63 << 8, 100, 0);
 
-    // Amplitude LFO set up in mod function
-    triangle_configure(&global_config.amp_lfo_config, 0, 0, 0, 1);
+        // Amplitude LFO set up in mod function
+        triangle_configure(&osc->amp_lfo_config, 0, 0, 0, 1);
 
-    // No pitch LFO
-    adsr_configure(&global_config.pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
-    triangle_configure(&global_config.pitch_lfo_config, 0, 0, 0, 1);
+        // No pitch LFO
+        adsr_configure(&osc->pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
+        triangle_configure(&osc->pitch_lfo_config, 0, 0, 0, 1);
+    }
 
     // No arp
     arp_configure(&global_config.arp_config, NULL, 0, 0);
 }
 
 static void mod_chorus() {
-    // PWM based on depth knob
-    int16_t pwm_amt = (knobs.depth < 12 ? knobs.depth : 12) << 10;
-    global_config.pwm_lfo_config.low = -pwm_amt;
-    global_config.pwm_lfo_config.high = pwm_amt;
-    global_config.pwm_lfo_config.increment = knobs.depth >> 1;
+    for (int i = 0; i < N_VOICES; i++) {
+        struct osc_state *osc = &global.osc[i];
+        // PWM based on depth knob
+        int16_t pwm_amt = (knobs.depth < 12 ? knobs.depth : 12) << 10;
+        osc->pwm_lfo_config.low = -pwm_amt;
+        osc->pwm_lfo_config.high = pwm_amt;
+        osc->pwm_lfo_config.increment = knobs.depth >> 1;
 
-    global_config.amp_env_config.a_value = (64 + (knobs.depth >> 2)) << 8;
+        osc->amp_env_config.a_value = (64 + (knobs.depth >> 2)) << 8;
 
-    // Tremolo speed and amount based on freq knob
-    int16_t tremolo_amt = (knobs.freq < 127 ? knobs.freq : 127) << 7;
-    global_config.amp_lfo_config.low = -tremolo_amt;
-    global_config.amp_lfo_config.high = tremolo_amt;
-    global_config.amp_lfo_config.increment = ((uint16_t)knobs.freq * knobs.freq) >> 8;
+        // Tremolo speed and amount based on freq knob
+        int16_t tremolo_amt = (knobs.freq < 127 ? knobs.freq : 127) << 7;
+        osc->amp_lfo_config.low = -tremolo_amt;
+        osc->amp_lfo_config.high = tremolo_amt;
+        osc->amp_lfo_config.increment = ((uint16_t)knobs.freq * knobs.freq) >> 8;
+    }
 }
 
 static void init_wave() {
     global_config.mode = MODE_POLY;
 
-    // Constant PWM
-    //triangle_configure(&global_config.pwm_lfo_config, 0, -96 << 8, 96 << 8, 10000);
-    triangle_configure(&global_config.pwm_lfo_config, -120 << 8, 120 << 8, -120 << 8, 800);
+    for (int i = 0; i < N_VOICES; i++) {
+        struct osc_state *osc = &global.osc[i];
+        // Constant PWM
+        //triangle_configure(&osc->pwm_lfo_config, 0, -96 << 8, 96 << 8, 10000);
+        triangle_configure(&osc->pwm_lfo_config, -120 << 8, 120 << 8, -120 << 8, 800);
 
-    // Basic amplitude envelope
-    adsr_configure(&global_config.amp_env_config, 0, 1, 127 << 8, 1000, 63 << 8, 100, 0);
+        // Basic amplitude envelope
+        adsr_configure(&osc->amp_env_config, 0, 1, 127 << 8, 1000, 63 << 8, 100, 0);
 
-    // Basic amplitude envelope, no amplitude LFO
-    adsr_configure(&global_config.amp_env_config, 0, 100, 64 << 8, 1, 64 << 8, 100, 0);
-    triangle_configure(&global_config.amp_lfo_config, 0, 0, 0, 1);
+        // Basic amplitude envelope, no amplitude LFO
+        adsr_configure(&osc->amp_env_config, 0, 100, 64 << 8, 1, 64 << 8, 100, 0);
+        triangle_configure(&osc->amp_lfo_config, 0, 0, 0, 1);
 
-    // No pitch LFO
-    adsr_configure(&global_config.pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
-    triangle_configure(&global_config.pitch_lfo_config, 0, 0, 0, 1);
+        // No pitch LFO
+        adsr_configure(&osc->pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
+        triangle_configure(&osc->pitch_lfo_config, 0, 0, 0, 1);
+    }
 
     // No arp
     arp_configure(&global_config.arp_config, NULL, 0, 0);
 }
 
 static void mod_wave() {
-    // Release based on depth knob
-    //global_config.amp_env_config.a_incr = (knobs.depth < 127 ? knobs.depth : 127) << 2;
-    uint16_t inv_knob = 255 - knobs.freq;
-    global_config.amp_env_config.r_incr = -(((inv_knob * inv_knob) >> 11) + 1);
+    for (int i = 0; i < N_VOICES; i++) {
+        struct osc_state *osc = &global.osc[i];
+        // Release based on depth knob
+        //osc->amp_env_config.a_incr = (knobs.depth < 127 ? knobs.depth : 127) << 2;
+        uint16_t inv_knob = 255 - knobs.freq;
+        osc->amp_env_config.r_incr = -(((inv_knob * inv_knob) >> 11) + 1);
 
-    global_config.pwm_lfo_config.high = (((int16_t)-120 << 7) + (int16_t)knobs.depth * (240 >> 1)) << 1;
-    global_config.pwm_lfo_config.initial_value = (global_config.pwm_lfo_config.low + global_config.pwm_lfo_config.high) >> 1;
-    //global_config.pwm_lfo_config.increment = ((uint16_t)knobs.depth * knobs.depth) >> 11;
-    global_config.pwm_lfo_config.increment = knobs.depth >> 3;
+        osc->pwm_lfo_config.high = (((int16_t)-120 << 7) + (int16_t)knobs.depth * (240 >> 1)) << 1;
+        osc->pwm_lfo_config.initial_value = (osc->pwm_lfo_config.low + osc->pwm_lfo_config.high) >> 1;
+        //osc->pwm_lfo_config.increment = ((uint16_t)knobs.depth * knobs.depth) >> 11;
+        osc->pwm_lfo_config.increment = knobs.depth >> 3;
+    }
 }
 
 static void init_bass() {
     global_config.mode = MODE_OCTAVE;
 
-    // No PWM
-    triangle_configure(&global_config.pwm_lfo_config, 0, 0, 0, 1);
+    for (int i = 0; i < N_VOICES; i++) {
+        struct osc_state *osc = &global.osc[i];
+        // PWM on upper octave
+        triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
 
-    // Basic amplitude envelope, no amplitude LFO
-    adsr_configure(&global_config.amp_env_config, 0, 1, 64 << 8, 1, 64 << 8, 100, 0);
-    global_config.amp_env_config.s_value = 0;
-    triangle_configure(&global_config.amp_lfo_config, 0, 0, 0, 1);
+        // Basic amplitude envelope, no amplitude LFO
+        adsr_configure(&osc->amp_env_config, 0, 1, 64 << 8, 1, 64 << 8, 300, 0);
+        osc->amp_env_config.s_value = 0;
+        triangle_configure(&osc->amp_lfo_config, 0, 0, 0, 1);
 
-    // Add some vibrato
-    const int16_t et = 6000;
-    const int16_t ev = 6000;
-    adsr_configure(&global_config.pitch_env_config, 0, et, ev, 1, ev, 1, 0);
-    const int16_t ot = 400;
-    const int16_t ov = 200;
-    triangle_configure(&global_config.pitch_lfo_config, -ov, ov, 0, ot);
+        // No pitch LFO
+        adsr_configure(&osc->pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
+        triangle_configure(&osc->pitch_lfo_config, 0, 0, 0, 1);
+    }
 
     // No arp
     arp_configure(&global_config.arp_config, NULL, 0, 0);
 }
 
 static void mod_bass() {
-    // Decay based on depth knob
-    global_config.amp_env_config.d_incr = -(knobs.depth < 127 ? (144 - knobs.depth) : (255 - knobs.depth) >> 3);
-    global_config.amp_env_config.s_value = knobs.depth < 255 ? 0 : 64 << 8;
+    for (int i = 0; i < N_VOICES; i++) {
+        struct osc_state *osc = &global.osc[i];
 
-    // Vibrato speed and amount based on freq knob
-    int16_t vibrato_amt = knobs.freq << 4;
-    global_config.pitch_lfo_config.low = -vibrato_amt;
-    global_config.pitch_lfo_config.high = vibrato_amt;
-    global_config.pitch_lfo_config.increment = ((uint16_t)knobs.freq * knobs.freq) >> 11;
+        if (i == 0) {
+            // PWM based on depth knob
+            int16_t pwm_amt = (knobs.depth < 12 ? knobs.depth : 12) << 10;
+            osc->pwm_lfo_config.low = -pwm_amt;
+            osc->pwm_lfo_config.high = pwm_amt;
+            osc->pwm_lfo_config.increment = knobs.depth >> 1;
+        }
+
+        // Vibrato speed and amount based on freq knob
+        int16_t vibrato_amt = knobs.freq << 4;
+        osc->pitch_lfo_config.low = -vibrato_amt;
+        osc->pitch_lfo_config.high = vibrato_amt;
+        osc->pitch_lfo_config.increment = ((uint16_t)knobs.freq * knobs.freq) >> 11;
+
+        if (i == 1) {
+            // Bring in lower octave with depth knob
+            uint16_t vol = knobs.depth < 64 ? knobs.depth : 64;
+            osc->amp_env_config.a_value = vol << 8;
+            osc->amp_env_config.s_value = vol << 8;
+
+            // Tremolo on lower octave
+            int16_t tremolo_amt = (knobs.freq < 127 ? knobs.freq : 127) << 7;
+            osc->amp_lfo_config.low = -tremolo_amt;
+            osc->amp_lfo_config.high = tremolo_amt;
+            osc->amp_lfo_config.increment = ((uint16_t)knobs.freq * knobs.freq) >> 8;
+        }
+    }
 }
 
 static void init_empty() {
     global_config.mode = MODE_POLY;
 
-    triangle_configure(&global_config.pwm_lfo_config, 0, 0, 0, 1);
+    for (int i = 0; i < N_VOICES; i++) {
+        struct osc_state *osc = &global.osc[i];
+        triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
 
-    adsr_configure(&global_config.amp_env_config, 0, 1, 0, 1, 0, 1, 0);
-    global_config.amp_env_config.s_value = 0;
-    triangle_configure(&global_config.amp_lfo_config, 0, 0, 0, 1);
+        adsr_configure(&osc->amp_env_config, 0, 1, 0, 1, 0, 1, 0);
+        osc->amp_env_config.s_value = 0;
+        triangle_configure(&osc->amp_lfo_config, 0, 0, 0, 1);
 
-    adsr_configure(&global_config.pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
-    triangle_configure(&global_config.pitch_lfo_config, 0, 0, 0, 1);
+        adsr_configure(&osc->pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
+        triangle_configure(&osc->pitch_lfo_config, 0, 0, 0, 1);
+    }
 
     arp_configure(&global_config.arp_config, NULL, 0, 0);
 }
@@ -976,13 +1018,13 @@ static void update_modulation() {
         uint8_t velocity = note_velocity[i];
 
         // Advance pwm LFO
-        uint8_t pwm_lfo_value = 127 + (triangle_update(&osc->pwm_lfo, &global_config.pwm_lfo_config, notes_held) >> 8);
+        uint8_t pwm_lfo_value = 127 + (triangle_update(&osc->pwm_lfo, &global.osc[i].pwm_lfo_config, notes_held) >> 8);
 
         // Advance amplitude LFO
-        uint16_t amp_lfo_value = 32767 + triangle_update(&osc->amp_lfo, &global_config.amp_lfo_config, notes_held);
+        uint16_t amp_lfo_value = 32767 + triangle_update(&osc->amp_lfo, &global.osc[i].amp_lfo_config, notes_held);
 
         // Advance pitch LFO
-        int16_t pitch_lfo_value = triangle_update(&osc->pitch_lfo, &global_config.pitch_lfo_config, notes_held);
+        int16_t pitch_lfo_value = triangle_update(&osc->pitch_lfo, &global.osc[i].pitch_lfo_config, notes_held);
 
         // Store triggered velocity
         uint8_t gate = 0;
@@ -993,8 +1035,8 @@ static void update_modulation() {
         }
 
         // Advance envelope generators
-        int16_t amp_env_value = adsr_update(&osc->amp_env, &global_config.amp_env_config, gate);
-        int16_t pitch_env_value = adsr_update(&osc->pitch_env, &global_config.pitch_env_config, gate);
+        int16_t amp_env_value = adsr_update(&osc->amp_env, &global.osc[i].amp_env_config, gate);
+        int16_t pitch_env_value = adsr_update(&osc->pitch_env, &global.osc[i].pitch_env_config, gate);
         int16_t pitch_adjust = ((int32_t)pitch_env_value * pitch_lfo_value) >> 15;
 
         // Calculate timer periods
