@@ -23,7 +23,11 @@ static void note_off(uint8_t k);
 static uint8_t note_index[N_VOICES];
 static uint8_t note_velocity[N_VOICES];
 
-static bool poly = true;
+enum mode {
+    MODE_MONO,
+    MODE_POLY,
+    MODE_OCTAVE,
+};
 
 static uint8_t mod = 0;
 
@@ -356,11 +360,32 @@ struct osc_state {
     uint8_t triggered_velocity;
 
     struct adsr_state amp_env;
+    struct triangle_state amp_lfo;
     struct adsr_state pitch_env;
+    struct triangle_state pitch_lfo;
+    struct triangle_state pwm_lfo;
 
     // Output stuff
     int8_t amplitude;
 };
+
+#define MIN_PER 300
+
+static struct global_config {
+    enum mode mode;
+    struct adsr_config amp_env_config;
+    struct triangle_config amp_lfo_config;
+    struct adsr_config pitch_env_config;
+    struct triangle_config pitch_lfo_config;
+    struct triangle_config pwm_lfo_config;
+    struct arp_config arp_config;
+} global_config;
+
+static struct global_state {
+    struct osc_state osc[N_VOICES];
+    int8_t mixer_inputs[N_VOICES];
+    struct arp_state arp;
+} global;
 
 static bool osc_handle_timer(struct osc_state *state, int8_t *out, volatile uint16_t *next_period) {
     // Returns the output signal level
@@ -396,27 +421,6 @@ static uint16_t period(int16_t note) {
     return per;
 }
 
-
-#define MIN_PER 300
-
-static struct global_config {
-    struct adsr_config amp_env_config;
-    struct triangle_config amp_lfo_config;
-    struct adsr_config pitch_env_config;
-    struct triangle_config pitch_lfo_config;
-    struct triangle_config pwm_lfo_config;
-    struct arp_config arp_config;
-} global_config;
-
-static struct global_state {
-    struct osc_state osc[N_VOICES];
-    int8_t mixer_inputs[N_VOICES];
-    struct triangle_state amp_lfo;
-    struct triangle_state pitch_lfo;
-    struct triangle_state pwm_lfo;
-    struct arp_state arp;
-} global;
-
 static void global_osc_init() {
     for (int i = 0; i < N_VOICES; i++) {
         global.osc[i].prescaler = 0;
@@ -425,20 +429,49 @@ static void global_osc_init() {
         global.osc[i].t = 0;
         global.osc[i].amplitude = 0;
         adsr_init(&global.osc[i].amp_env, &global_config.amp_env_config);
+        triangle_init(&global.osc[i].amp_lfo, &global_config.amp_lfo_config);
         adsr_init(&global.osc[i].pitch_env, &global_config.pitch_env_config);
+        triangle_init(&global.osc[i].pitch_lfo, &global_config.pitch_lfo_config);
+        triangle_init(&global.osc[i].pwm_lfo, &global_config.pwm_lfo_config);
     }
 }
 
-static void note_on(uint8_t k, uint8_t v) {
+static void note_off_mono(uint8_t k) {
+    if (note_index[0] == k && note_velocity[0] > 0) {
+        note_velocity[0] = 0;
+        check_notes();
+    }
+}
+
+static void note_on_mono(uint8_t k, uint8_t v) {
     if (v == 0) {
-        note_off(k);
+        note_off_mono(k);
         return;
     }
 
-    uint8_t n_voices = poly ? N_VOICES : 1;
+    note_index[0] = k;
+    note_velocity[0] = v;
+    check_notes();
+}
+
+static void note_off_poly(uint8_t k) {
+    for (int i = 0; i < N_VOICES; i++) {
+        if (note_index[i] == k && note_velocity[i] > 0) {
+            note_velocity[i] = 0;
+            check_notes();
+            return;
+        }
+    }
+}
+
+static void note_on_poly(uint8_t k, uint8_t v) {
+    if (v == 0) {
+        note_off_poly(k);
+        return;
+    }
 
     // Look for a free oscillator to use
-    for (int i = 0; i < n_voices; i++) {
+    for (int i = 0; i < N_VOICES; i++) {
         if (note_velocity[i] == 0 && (note_index[i] == k || global.osc[i].amplitude == 0)) {
             note_index[i] = k;
             note_velocity[i] = v;
@@ -447,7 +480,7 @@ static void note_on(uint8_t k, uint8_t v) {
         }
     }
     // Look for a releasing note to use
-    for (int i = 0; i < n_voices; i++) {
+    for (int i = 0; i < N_VOICES; i++) {
         if (note_velocity[i] == 0) {
             note_index[i] = k;
             note_velocity[i] = v;
@@ -458,16 +491,28 @@ static void note_on(uint8_t k, uint8_t v) {
     // Overwrite a currently playing note
     note_index[0] = k;
     note_velocity[0] = v;
+    check_notes();
 }
 
-static void note_off(uint8_t k) {
-    for (int i = 0; i < N_VOICES; i++) {
-        if (note_index[i] == k && note_velocity[i] > 0) {
-            note_velocity[i] = 0;
-            check_notes();
-            return;
-        }
+static void note_off_octave(uint8_t k) {
+    if (note_index[0] == k && note_velocity[0] > 0) {
+        note_velocity[0] = 0;
+        note_velocity[1] = 0;
+        check_notes();
     }
+}
+
+static void note_on_octave(uint8_t k, uint8_t v) {
+    if (v == 0) {
+        note_off_octave(k);
+        return;
+    }
+
+    note_index[0] = k;
+    note_velocity[0] = v;
+    note_index[1] = k - 12;
+    note_velocity[1] = v;
+    check_notes();
 }
 
 static void all_notes_off() {
@@ -475,6 +520,34 @@ static void all_notes_off() {
         note_velocity[i] = 0;
     }
     check_notes();
+}
+
+static void note_on(uint8_t k, uint8_t v) {
+    switch (global_config.mode) {
+        case MODE_MONO:
+            note_on_mono(k, v);
+            break;
+        case MODE_POLY:
+            note_on_poly(k, v);
+            break;
+        case MODE_OCTAVE:
+            note_on_octave(k, v);
+            break;
+    }
+}
+
+static void note_off(uint8_t k) {
+    switch (global_config.mode) {
+        case MODE_MONO:
+            note_off_mono(k);
+            break;
+        case MODE_POLY:
+            note_off_poly(k);
+            break;
+        case MODE_OCTAVE:
+            note_off_octave(k);
+            break;
+    }
 }
 
 
@@ -573,15 +646,15 @@ static struct knobs {
 } knobs;
 
 static void init_basic() {
+    global_config.mode = MODE_POLY;
+
     // No PWM
     triangle_configure(&global_config.pwm_lfo_config, 0, 0, 0, 1);
-    triangle_init(&global.pwm_lfo, &global_config.pwm_lfo_config);
 
     // Basic amplitude envelope, no amplitude LFO
     adsr_configure(&global_config.amp_env_config, 0, 1, 64 << 8, 1, 64 << 8, 100, 0);
     global_config.amp_env_config.s_value = 0;
     triangle_configure(&global_config.amp_lfo_config, 0, 0, 0, 1);
-    triangle_init(&global.amp_lfo, &global_config.amp_lfo_config);
 
     // Add some vibrato
     const int16_t et = 6000;
@@ -590,11 +663,9 @@ static void init_basic() {
     const int16_t ot = 400;
     const int16_t ov = 200;
     triangle_configure(&global_config.pitch_lfo_config, -ov, ov, 0, ot);
-    triangle_init(&global.pitch_lfo, &global_config.pitch_lfo_config);
 
     // No arp
     arp_configure(&global_config.arp_config, NULL, 0, 0);
-    arp_init(&global.arp, &global_config.arp_config);
 }
 
 static void mod_basic() {
@@ -610,25 +681,23 @@ static void mod_basic() {
 }
 
 static void init_chorus() {
+    global_config.mode = MODE_POLY;
+
     // No PWM
     triangle_configure(&global_config.pwm_lfo_config, 0, 0, 0, 1);
-    triangle_init(&global.pwm_lfo, &global_config.pwm_lfo_config);
 
     // Basic amplitude envelope
     adsr_configure(&global_config.amp_env_config, 0, 1, 127 << 8, 1000, 63 << 8, 100, 0);
 
     // Amplitude LFO set up in mod function
     triangle_configure(&global_config.amp_lfo_config, 0, 0, 0, 1);
-    triangle_init(&global.amp_lfo, &global_config.amp_lfo_config);
 
     // No pitch LFO
     adsr_configure(&global_config.pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
     triangle_configure(&global_config.pitch_lfo_config, 0, 0, 0, 1);
-    triangle_init(&global.pitch_lfo, &global_config.pitch_lfo_config);
 
     // No arp
     arp_configure(&global_config.arp_config, NULL, 0, 0);
-    arp_init(&global.arp, &global_config.arp_config);
 }
 
 static void mod_chorus() {
@@ -648,10 +717,11 @@ static void mod_chorus() {
 }
 
 static void init_wave() {
+    global_config.mode = MODE_POLY;
+
     // Constant PWM
     //triangle_configure(&global_config.pwm_lfo_config, 0, -96 << 8, 96 << 8, 10000);
     triangle_configure(&global_config.pwm_lfo_config, -120 << 8, 120 << 8, -120 << 8, 800);
-    triangle_init(&global.pwm_lfo, &global_config.pwm_lfo_config);
 
     // Basic amplitude envelope
     adsr_configure(&global_config.amp_env_config, 0, 1, 127 << 8, 1000, 63 << 8, 100, 0);
@@ -659,16 +729,13 @@ static void init_wave() {
     // Basic amplitude envelope, no amplitude LFO
     adsr_configure(&global_config.amp_env_config, 0, 100, 64 << 8, 1, 64 << 8, 100, 0);
     triangle_configure(&global_config.amp_lfo_config, 0, 0, 0, 1);
-    triangle_init(&global.amp_lfo, &global_config.amp_lfo_config);
 
     // No pitch LFO
     adsr_configure(&global_config.pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
     triangle_configure(&global_config.pitch_lfo_config, 0, 0, 0, 1);
-    triangle_init(&global.pitch_lfo, &global_config.pitch_lfo_config);
 
     // No arp
     arp_configure(&global_config.arp_config, NULL, 0, 0);
-    arp_init(&global.arp, &global_config.arp_config);
 }
 
 static void mod_wave() {
@@ -683,21 +750,54 @@ static void mod_wave() {
     global_config.pwm_lfo_config.increment = knobs.depth >> 3;
 }
 
-static void init_empty() {
+static void init_bass() {
+    global_config.mode = MODE_OCTAVE;
+
+    // No PWM
     triangle_configure(&global_config.pwm_lfo_config, 0, 0, 0, 1);
-    triangle_init(&global.pwm_lfo, &global_config.pwm_lfo_config);
+
+    // Basic amplitude envelope, no amplitude LFO
+    adsr_configure(&global_config.amp_env_config, 0, 1, 64 << 8, 1, 64 << 8, 100, 0);
+    global_config.amp_env_config.s_value = 0;
+    triangle_configure(&global_config.amp_lfo_config, 0, 0, 0, 1);
+
+    // Add some vibrato
+    const int16_t et = 6000;
+    const int16_t ev = 6000;
+    adsr_configure(&global_config.pitch_env_config, 0, et, ev, 1, ev, 1, 0);
+    const int16_t ot = 400;
+    const int16_t ov = 200;
+    triangle_configure(&global_config.pitch_lfo_config, -ov, ov, 0, ot);
+
+    // No arp
+    arp_configure(&global_config.arp_config, NULL, 0, 0);
+}
+
+static void mod_bass() {
+    // Decay based on depth knob
+    global_config.amp_env_config.d_incr = -(knobs.depth < 127 ? (144 - knobs.depth) : (255 - knobs.depth) >> 3);
+    global_config.amp_env_config.s_value = knobs.depth < 255 ? 0 : 64 << 8;
+
+    // Vibrato speed and amount based on freq knob
+    int16_t vibrato_amt = knobs.freq << 4;
+    global_config.pitch_lfo_config.low = -vibrato_amt;
+    global_config.pitch_lfo_config.high = vibrato_amt;
+    global_config.pitch_lfo_config.increment = ((uint16_t)knobs.freq * knobs.freq) >> 11;
+}
+
+static void init_empty() {
+    global_config.mode = MODE_POLY;
+
+    triangle_configure(&global_config.pwm_lfo_config, 0, 0, 0, 1);
 
     adsr_configure(&global_config.amp_env_config, 0, 1, 0, 1, 0, 1, 0);
     global_config.amp_env_config.s_value = 0;
     triangle_configure(&global_config.amp_lfo_config, 0, 0, 0, 1);
-    triangle_init(&global.amp_lfo, &global_config.amp_lfo_config);
 
     adsr_configure(&global_config.pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
     triangle_configure(&global_config.pitch_lfo_config, 0, 0, 0, 1);
-    triangle_init(&global.pitch_lfo, &global_config.pitch_lfo_config);
 
     arp_configure(&global_config.arp_config, NULL, 0, 0);
-    arp_init(&global.arp, &global_config.arp_config);
 }
 
 static void mod_empty() {
@@ -773,8 +873,8 @@ static const struct patches {
         .mod_fn = mod_wave,
     },
     {
-        .init_fn = init_empty,
-        .mod_fn = mod_empty,
+        .init_fn = init_bass,
+        .mod_fn = mod_bass,
     },
     {
         .init_fn = init_empty,
@@ -849,6 +949,7 @@ static void read_knobs() {
         last_select = read_select;
         knobs.select = read_select;
         all_notes_off();
+        arp_init(&global.arp, &global_config.arp_config);
         global_osc_init();
         patch_init();
     }
@@ -865,15 +966,6 @@ static void update_modulation() {
         notes_held = notes_held || note_velocity[i] > 0;
     }
 
-    // Advance global pwm LFO
-    uint8_t pwm_lfo_value = 127 + (triangle_update(&global.pwm_lfo, &global_config.pwm_lfo_config, notes_held) >> 8);
-
-    // Advance global amplitude LFO
-    uint16_t amp_lfo_value = 32767 + triangle_update(&global.amp_lfo, &global_config.amp_lfo_config, notes_held);
-
-    // Advance global pitch LFO
-    int16_t pitch_lfo_value = triangle_update(&global.pitch_lfo, &global_config.pitch_lfo_config, notes_held);
-
     // Advance arp
     int8_t arp_note = arp_update(&global.arp, &global_config.arp_config, notes_held);
 
@@ -882,6 +974,15 @@ static void update_modulation() {
         struct osc_state *osc = &global.osc[i];
         uint8_t note = note_index[i];
         uint8_t velocity = note_velocity[i];
+
+        // Advance pwm LFO
+        uint8_t pwm_lfo_value = 127 + (triangle_update(&osc->pwm_lfo, &global_config.pwm_lfo_config, notes_held) >> 8);
+
+        // Advance amplitude LFO
+        uint16_t amp_lfo_value = 32767 + triangle_update(&osc->amp_lfo, &global_config.amp_lfo_config, notes_held);
+
+        // Advance pitch LFO
+        int16_t pitch_lfo_value = triangle_update(&osc->pitch_lfo, &global_config.pitch_lfo_config, notes_held);
 
         // Store triggered velocity
         uint8_t gate = 0;
