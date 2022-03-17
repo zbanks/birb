@@ -17,11 +17,22 @@ const uint16_t PERIOD_LKUP[] = {
 static void note_on(uint8_t k, uint8_t v);
 static void note_off(uint8_t k);
 
-#define N_VOICES 3
+#define N_NOTES 5
+#define N_OSC 3
 #define N_SELECTOR_POSITIONS 12
 
-static uint8_t note_index[N_VOICES];
-static uint8_t note_velocity[N_VOICES];
+#define NO_NOTE 255
+#define NO_OSC 255
+
+// Notes currently held down, and how they are being voiced
+static uint8_t note_index[N_NOTES];
+static uint8_t note_velocity[N_NOTES];
+static uint8_t note_osc[N_NOTES];
+
+// Computed from the note_* arrays:
+static uint8_t osc_note_index[N_OSC];
+static uint8_t osc_note_velocity[N_OSC];
+
 
 enum mode {
     MODE_MONO,
@@ -344,7 +355,22 @@ ISR (USART0_RXC_vect)
     rx(USART0.RXDATAL);
 }
 
-static void check_notes() {
+static void update_osc_from_notes() {
+    //for (int i = 0; i < N_NOTES; i++) {
+    //    uint8_t osc_index = note_osc[i];
+    //    if (osc_index != NO_OSC) {
+    //        osc_note_index[osc_index] = note_index[i];
+    //        osc_note_velocity[osc_index] = note_velocity[i];
+    //    }
+    //}
+    for (int i = 0; i < N_NOTES; i++) {
+        if (note_velocity[i] > 0) {
+            osc_note_index[0] = note_index[i];
+            osc_note_velocity[0] = note_velocity[i];
+            return;
+        }
+    }
+    osc_note_velocity[0] = 0;
 }
 
 static void update_modulation();
@@ -383,8 +409,8 @@ static struct global_config {
 } global_config;
 
 static struct global_state {
-    struct osc_state osc[N_VOICES];
-    int8_t mixer_inputs[N_VOICES];
+    struct osc_state osc[N_OSC];
+    int8_t mixer_inputs[N_OSC];
     struct arp_state arp;
 } global;
 
@@ -423,7 +449,7 @@ static uint16_t period(int16_t note) {
 }
 
 static void global_osc_init() {
-    for (int i = 0; i < N_VOICES; i++) {
+    for (int i = 0; i < N_OSC; i++) {
         global.osc[i].prescaler = 0;
         global.osc[i].timer_period_high = 1250;
         global.osc[i].timer_period_low = 1250;
@@ -440,90 +466,151 @@ static void global_osc_init() {
 static void note_off_mono(uint8_t k) {
     if (note_index[0] == k && note_velocity[0] > 0) {
         note_velocity[0] = 0;
-        check_notes();
+        update_osc_from_notes();
     }
 }
 
 static void note_on_mono(uint8_t k, uint8_t v) {
-    if (v == 0) {
-        note_off_mono(k);
-        return;
-    }
-
     note_index[0] = k;
     note_velocity[0] = v;
-    check_notes();
+    note_osc[0] = 0;
+    update_osc_from_notes();
 }
 
 static void note_off_poly(uint8_t k) {
-    for (int i = 0; i < N_VOICES; i++) {
+    for (int i = 0; i < N_NOTES; i++) {
         if (note_index[i] == k && note_velocity[i] > 0) {
             note_velocity[i] = 0;
-            check_notes();
+            update_osc_from_notes();
             return;
+        }
+    }
+}
+
+static void assign_osc_poly() {
+    // Finds a free oscillator to use and return its index.
+
+    // Suitability scores:
+    // 2 = unused
+    // 1 = note release
+    // 0 = active
+
+    uint8_t osc_suitability[N_OSC];
+    for (int i = 0; i < N_OSC; i++) {
+        osc_suitability[i] = 2;
+    }
+
+    // Calculate oscillator suitability
+    for (int i = 1; i < N_NOTES; i++) {
+        uint8_t osc_index = note_osc[i];
+        if (osc_index != NO_OSC) {
+            if (note_velocity[i] == 0) {
+                if (global.osc[osc_index].amplitude == 0) {
+                    // Note is inactive; suitability is 2 (default)
+                } else {
+                    // Note is releasing; suitability is 1
+                    if (osc_suitability[osc_index] > 1) {
+                        osc_suitability[osc_index] = 1;
+                    }
+                }
+            } else {
+                // Note is active; suitability is 0
+                osc_suitability[osc_index] = 0;
+            }
+        }
+    }
+
+    // Find the most suitable osc
+    uint8_t max_suitability_index = 0;
+    uint8_t max_suitability_score = osc_suitability[0];
+    for (int i = 1; i < N_OSC; i++) {
+        if (osc_suitability[i] > max_suitability_score) {
+            max_suitability_index = i;
+            max_suitability_score = osc_suitability[i];
+        }
+    }
+
+    // Perform the oscillator (re)assignment
+    note_osc[0] = max_suitability_index;
+    for (int i = 1; i < N_NOTES; i++) {
+        if (note_osc[i] == max_suitability_index) {
+            note_osc[i] = NO_OSC; // Stolen!
+            break;
         }
     }
 }
 
 static void note_on_poly(uint8_t k, uint8_t v) {
-    if (v == 0) {
-        note_off_poly(k);
-        return;
+    // Figure out which note entry to replace with the new note.
+    // If the note is already in our list, use that entry.
+    // If not, default to the oldest slot.
+    uint8_t replace_index = N_NOTES - 1;
+    for (int i = 0; i < N_NOTES - 1; i++) {
+        if (note_index[i] == k) {
+            replace_index = i;
+            break;
+        }
     }
 
-    // Look for a free oscillator to use
-    for (int i = 0; i < N_VOICES; i++) {
-        if (note_velocity[i] == 0 && (note_index[i] == k || global.osc[i].amplitude == 0)) {
-            note_index[i] = k;
-            note_velocity[i] = v;
-            check_notes();
-            return;
-        }
+    uint8_t replaced_k = note_index[replace_index];
+    uint8_t replaced_osc = note_osc[replace_index];
+
+    // Add new note to beginning and shift everything right by one
+    for (int i = 0; i < replace_index; i++) {
+        note_index[i + 1] = note_index[i];
+        note_velocity[i + 1] = note_velocity[i];
+        note_osc[i + 1] = note_osc[i];
     }
-    // Look for a releasing note to use
-    for (int i = 0; i < N_VOICES; i++) {
-        if (note_velocity[i] == 0) {
-            note_index[i] = k;
-            note_velocity[i] = v;
-            check_notes();
-            return;
-        }
+
+    if (replaced_k != k) {
+        // Find a suitable oscillator to use for this new note
+        note_index[0] = k;
+        note_velocity[0] = v;
+        assign_osc_poly();
+    } else {
+        // Re-use the same oscillator if it's the same note
+        // (i.e. don't allow oscillators in unison)
+        note_index[0] = k;
+        note_velocity[0] = v;
+        note_osc[0] = replaced_osc;
     }
-    // Overwrite a currently playing note
-    note_index[0] = k;
-    note_velocity[0] = v;
-    check_notes();
+
+    update_osc_from_notes();
 }
 
 static void note_off_octave(uint8_t k) {
     if (note_index[0] == k && note_velocity[0] > 0) {
         note_velocity[0] = 0;
         note_velocity[1] = 0;
-        check_notes();
+        update_osc_from_notes();
     }
 }
 
 static void note_on_octave(uint8_t k, uint8_t v) {
-    if (v == 0) {
-        note_off_octave(k);
-        return;
-    }
-
     note_index[0] = k;
     note_velocity[0] = v;
+    note_osc[0] = 0;
     note_index[1] = k - 12;
     note_velocity[1] = v;
-    check_notes();
+    note_osc[1] = 1;
+    update_osc_from_notes();
 }
 
 static void all_notes_off() {
-    for (int i = 0; i < N_VOICES; i++) {
+    for (int i = 0; i < N_NOTES; i++) {
         note_velocity[i] = 0;
     }
-    check_notes();
+    for (int i = 0; i < N_OSC; i++) {
+        osc_note_velocity[i] = 0;
+    }
 }
 
 static void note_on(uint8_t k, uint8_t v) {
+    if (v == 0) {
+        note_off(k);
+        return;
+    }
+
     switch (global_config.mode) {
         case MODE_MONO:
             note_on_mono(k, v);
@@ -649,7 +736,7 @@ static struct knobs {
 static void init_basic() {
     global_config.mode = MODE_POLY;
 
-    for (int i=0; i<N_VOICES; i++) {
+    for (int i=0; i<N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
         // No PWM
         triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
@@ -673,7 +760,7 @@ static void init_basic() {
 }
 
 static void mod_basic() {
-    for (int i=0; i<N_VOICES; i++) {
+    for (int i=0; i<N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
         // Decay based on depth knob
         osc->amp_env_config.d_incr = -(knobs.depth < 127 ? (144 - knobs.depth) : (255 - knobs.depth) >> 3);
@@ -690,7 +777,7 @@ static void mod_basic() {
 static void init_chorus() {
     global_config.mode = MODE_POLY;
 
-    for (int i = 0; i < N_VOICES; i++) {
+    for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
         // No PWM
         triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
@@ -711,7 +798,7 @@ static void init_chorus() {
 }
 
 static void mod_chorus() {
-    for (int i = 0; i < N_VOICES; i++) {
+    for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
         // PWM based on depth knob
         int16_t pwm_amt = (knobs.depth < 12 ? knobs.depth : 12) << 10;
@@ -732,7 +819,7 @@ static void mod_chorus() {
 static void init_wave() {
     global_config.mode = MODE_POLY;
 
-    for (int i = 0; i < N_VOICES; i++) {
+    for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
         // Constant PWM
         //triangle_configure(&osc->pwm_lfo_config, 0, -96 << 8, 96 << 8, 10000);
@@ -755,7 +842,7 @@ static void init_wave() {
 }
 
 static void mod_wave() {
-    for (int i = 0; i < N_VOICES; i++) {
+    for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
         // Release based on depth knob
         //osc->amp_env_config.a_incr = (knobs.depth < 127 ? knobs.depth : 127) << 2;
@@ -772,14 +859,13 @@ static void mod_wave() {
 static void init_bass() {
     global_config.mode = MODE_OCTAVE;
 
-    for (int i = 0; i < N_VOICES; i++) {
+    for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
         // PWM on upper octave
         triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
 
         // Basic amplitude envelope, no amplitude LFO
         adsr_configure(&osc->amp_env_config, 0, 1, 64 << 8, 1, 64 << 8, 300, 0);
-        osc->amp_env_config.s_value = 0;
         triangle_configure(&osc->amp_lfo_config, 0, 0, 0, 1);
 
         // No pitch LFO
@@ -792,7 +878,7 @@ static void init_bass() {
 }
 
 static void mod_bass() {
-    for (int i = 0; i < N_VOICES; i++) {
+    for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
 
         if (i == 0) {
@@ -827,7 +913,7 @@ static void mod_bass() {
 static void init_empty() {
     global_config.mode = MODE_POLY;
 
-    for (int i = 0; i < N_VOICES; i++) {
+    for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
         triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
 
@@ -1004,7 +1090,7 @@ static void update_modulation() {
     patch_mod();
 
     bool notes_held = false;
-    for (int i=0; i<N_VOICES; i++) {
+    for (int i=0; i<N_OSC; i++) {
         notes_held = notes_held || note_velocity[i] > 0;
     }
 
@@ -1012,10 +1098,10 @@ static void update_modulation() {
     int8_t arp_note = arp_update(&global.arp, &global_config.arp_config, notes_held);
 
     // Advance each oscillator
-    for (int i=0; i<N_VOICES; i++) {
+    for (int i=0; i<N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
-        uint8_t note = note_index[i];
-        uint8_t velocity = note_velocity[i];
+        uint8_t note = osc_note_index[i];
+        uint8_t velocity = osc_note_velocity[i];
 
         // Advance pwm LFO
         uint8_t pwm_lfo_value = 127 + (triangle_update(&osc->pwm_lfo, &global.osc[i].pwm_lfo_config, notes_held) >> 8);
@@ -1065,7 +1151,7 @@ static void update_modulation() {
 
     // See if any oscillators are outputting
     bool led_on = false;
-    for (int i=0; i<N_VOICES; i++) {
+    for (int i=0; i<N_OSC; i++) {
         led_on = led_on || global.osc[i].amplitude > 0;
     }
 
@@ -1079,7 +1165,7 @@ static void update_modulation() {
 
 static void update_output(void) {
     int16_t out = 0;
-    for (int i = 0; i < N_VOICES; i++) {
+    for (int i = 0; i < N_OSC; i++) {
         out += global.mixer_inputs[i];
     }
     DAC0.DATA = 127 + (out >> 2);
