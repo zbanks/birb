@@ -363,14 +363,15 @@ static void update_osc_from_notes() {
     //        osc_note_velocity[osc_index] = note_velocity[i];
     //    }
     //}
-    for (int i = 0; i < N_NOTES; i++) {
-        if (note_velocity[i] > 0) {
-            osc_note_index[0] = note_index[i];
-            osc_note_velocity[0] = note_velocity[i];
-            return;
-        }
-    }
-    osc_note_velocity[0] = 0;
+
+    //for (int i = 0; i < N_NOTES; i++) {
+    //    if (note_velocity[i] > 0) {
+    //        osc_note_index[0] = note_index[i];
+    //        osc_note_velocity[0] = note_velocity[i];
+    //        return;
+    //    }
+    //}
+    //osc_note_velocity[0] = 0;
 }
 
 static void update_modulation();
@@ -466,7 +467,7 @@ static void global_osc_init() {
 static void note_off_mono(uint8_t k) {
     if (note_index[0] == k && note_velocity[0] > 0) {
         note_velocity[0] = 0;
-        update_osc_from_notes();
+        update_osc_from_notes(); // XXX
     }
 }
 
@@ -474,66 +475,94 @@ static void note_on_mono(uint8_t k, uint8_t v) {
     note_index[0] = k;
     note_velocity[0] = v;
     note_osc[0] = 0;
-    update_osc_from_notes();
+    update_osc_from_notes(); // XXX
 }
 
 static void note_off_poly(uint8_t k) {
+    uint8_t note_index_to_remove = NO_NOTE;
     for (int i = 0; i < N_NOTES; i++) {
         if (note_index[i] == k && note_velocity[i] > 0) {
-            note_velocity[i] = 0;
-            update_osc_from_notes();
-            return;
+            note_index_to_remove = i;
+            break;
         }
     }
+
+    // If no note was sounding, do nothing
+    if (note_index_to_remove == NO_NOTE) {
+        return;
+    }
+
+    // Mode specific code here (as a function of note_index_to_remove)
+
+    // TMP
+    //note_velocity[note_index_to_remove] = 0;
+    //int i;
+    //for (i = 0; i < N_NOTES; i++) {
+    //    if (note_velocity[i] > 0) {
+    //        osc_note_index[0] = note_index[i];
+    //        osc_note_velocity[0] = note_velocity[i];
+    //        break;
+    //    }
+    //}
+    //if (i == N_NOTES) {
+    //    osc_note_velocity[0] = 0;
+    //}
+    // END TMP
+
+    uint8_t osc_index = note_osc[note_index_to_remove];
+    if (osc_index != NO_OSC) {
+        osc_note_velocity[osc_index] = 0;
+    }
+
+    // End mode-specific code
+
+    // Remove from list by shifting left
+    for (int i = note_index_to_remove; i < N_NOTES - 1; i++) {
+        note_index[i] = note_index[i + 1];
+        note_velocity[i] = note_velocity[i + 1];
+        note_osc[i] = note_osc[i + 1];
+    }
+    // Clear out top entry in list
+    note_velocity[N_NOTES - 1] = 0;
+    note_osc[N_NOTES - 1] = NO_OSC;
 }
 
 static void assign_osc_poly() {
     // Finds a free oscillator to use and return its index.
 
-    // Suitability scores:
-    // 2 = unused
-    // 1 = note release
-    // 0 = active
+    uint8_t osc_index = 0;
 
-    uint8_t osc_suitability[N_OSC];
+    // First, look a completely quiet oscillators
     for (int i = 0; i < N_OSC; i++) {
-        osc_suitability[i] = 2;
-    }
-
-    // Calculate oscillator suitability
-    for (int i = 1; i < N_NOTES; i++) {
-        uint8_t osc_index = note_osc[i];
-        if (osc_index != NO_OSC) {
-            if (note_velocity[i] == 0) {
-                if (global.osc[osc_index].amplitude == 0) {
-                    // Note is inactive; suitability is 2 (default)
-                } else {
-                    // Note is releasing; suitability is 1
-                    if (osc_suitability[osc_index] > 1) {
-                        osc_suitability[osc_index] = 1;
-                    }
-                }
-            } else {
-                // Note is active; suitability is 0
-                osc_suitability[osc_index] = 0;
-            }
+        if (osc_note_velocity[i] == 0 && global.osc[i].amplitude == 0) {
+            osc_index = i;
+            goto found;
         }
     }
 
-    // Find the most suitable osc
-    uint8_t max_suitability_index = 0;
-    uint8_t max_suitability_score = osc_suitability[0];
-    for (int i = 1; i < N_OSC; i++) {
-        if (osc_suitability[i] > max_suitability_score) {
-            max_suitability_index = i;
-            max_suitability_score = osc_suitability[i];
+    // Failing that, look for a releasing oscillator
+    for (int i = 0; i < N_OSC; i++) {
+        if (osc_note_velocity[i] == 0) {
+            osc_index = i;
+            goto found;
         }
     }
+
+    // Failing that, steal the oldest note's oscillator
+    for (int i = N_NOTES - 1; i >= 0; i--) {
+        if (note_osc[i] != NO_OSC) {
+            osc_index = note_osc[i];
+            goto found;
+        }
+    }
+
+    found:
 
     // Perform the oscillator (re)assignment
-    note_osc[0] = max_suitability_index;
+    note_osc[0] = osc_index;
     for (int i = 1; i < N_NOTES; i++) {
-        if (note_osc[i] == max_suitability_index) {
+        if (note_osc[i] == osc_index) {
+            note_velocity[i] = 0;
             note_osc[i] = NO_OSC; // Stolen!
             break;
         }
@@ -553,16 +582,30 @@ static void note_on_poly(uint8_t k, uint8_t v) {
     }
 
     uint8_t replaced_k = note_index[replace_index];
+    uint8_t replaced_v = note_velocity[replace_index];
     uint8_t replaced_osc = note_osc[replace_index];
 
     // Add new note to beginning and shift everything right by one
-    for (int i = 0; i < replace_index; i++) {
-        note_index[i + 1] = note_index[i];
-        note_velocity[i + 1] = note_velocity[i];
-        note_osc[i + 1] = note_osc[i];
+    for (int i = replace_index; i >= 1; i--) {
+        note_index[i] = note_index[i - 1];
+        note_velocity[i] = note_velocity[i - 1];
+        note_osc[i] = note_osc[i - 1];
     }
 
-    if (replaced_k != k) {
+    note_index[0] = replaced_k;
+    note_velocity[0] = replaced_v;
+    note_osc[0] = replaced_osc;
+
+    // Begin mode-specific code
+
+    // TMP
+    //note_index[0] = k;
+    //note_velocity[0] = v;
+    //osc_note_index[0] = note_index[0];
+    //osc_note_velocity[0] = note_velocity[0];
+    // END TMP
+
+    if (note_index[0] != k || note_osc[0] == NO_OSC) {
         // Find a suitable oscillator to use for this new note
         note_index[0] = k;
         note_velocity[0] = v;
@@ -570,19 +613,22 @@ static void note_on_poly(uint8_t k, uint8_t v) {
     } else {
         // Re-use the same oscillator if it's the same note
         // (i.e. don't allow oscillators in unison)
-        note_index[0] = k;
         note_velocity[0] = v;
-        note_osc[0] = replaced_osc;
     }
 
-    update_osc_from_notes();
+    uint8_t osc_index = note_osc[0];
+    osc_note_index[osc_index] = k;
+    osc_note_velocity[osc_index] = k;
+
+    // End mode-specific code
+
 }
 
 static void note_off_octave(uint8_t k) {
     if (note_index[0] == k && note_velocity[0] > 0) {
         note_velocity[0] = 0;
         note_velocity[1] = 0;
-        update_osc_from_notes();
+        update_osc_from_notes(); // XXX
     }
 }
 
@@ -593,7 +639,7 @@ static void note_on_octave(uint8_t k, uint8_t v) {
     note_index[1] = k - 12;
     note_velocity[1] = v;
     note_osc[1] = 1;
-    update_osc_from_notes();
+    update_osc_from_notes(); // XXX
 }
 
 static void all_notes_off() {
@@ -1091,7 +1137,7 @@ static void update_modulation() {
 
     bool notes_held = false;
     for (int i=0; i<N_OSC; i++) {
-        notes_held = notes_held || note_velocity[i] > 0;
+        notes_held = notes_held || osc_note_velocity[i] > 0;
     }
 
     // Advance arp
