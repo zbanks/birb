@@ -42,6 +42,11 @@ enum mode {
     MODE_OCTAVE,
 };
 
+enum wave {
+    WAVE_PULSE,
+    WAVE_NOISE,
+};
+
 static uint8_t mod = 0;
 
 static int8_t sadd(int8_t x, int8_t y) {
@@ -409,6 +414,8 @@ struct osc_state {
     uint8_t triggered_note;
     uint8_t triggered_velocity;
 
+    enum wave wave;
+
     struct adsr_config amp_env_config;
     struct triangle_config amp_lfo_config;
     struct adsr_config pitch_env_config;
@@ -440,8 +447,9 @@ static struct global_state {
     struct arp_state arp;
 } global;
 
-static bool osc_handle_timer(struct osc_state *state, int8_t *out, volatile uint16_t *next_period) {
-    // Returns the output signal level
+static bool osc_handle_timer_pulse(struct osc_state *state, int8_t *out, volatile uint16_t *next_period) {
+    // For a pulse wave, this function
+    // returns the output signal level
     // and updates next_period with the time until this function should be called next
 
     if (state->prescaler > PRESCALER) {
@@ -453,6 +461,17 @@ static bool osc_handle_timer(struct osc_state *state, int8_t *out, volatile uint
 
     *next_period = (state->t & 1) ? state->timer_period_high : state->timer_period_low;
     *out = (state->t & 1) ? state->amplitude : -state->amplitude;
+    state->t++;
+    return true;
+}
+
+static bool osc_handle_timer_noise(struct osc_state *state, int8_t *out, volatile uint16_t *next_period) {
+    // For a pulse wave, this function
+    // returns the output signal level
+    // and updates next_period with the time until this function should be called next
+
+    *next_period = (state->t & 1) ? state->timer_period_high : state->timer_period_low;
+    *out = state->amplitude * (rand8() & 1) - 2 * state->amplitude;
     state->t++;
     return true;
 }
@@ -476,6 +495,7 @@ static uint16_t period(int16_t note) {
 
 static void global_osc_init() {
     for (int i = 0; i < N_OSC; i++) {
+        global.osc[i].wave = WAVE_PULSE;
         global.osc[i].prescaler = 0;
         global.osc[i].timer_period_high = 1250;
         global.osc[i].timer_period_low = 1250;
@@ -597,6 +617,7 @@ static void note_off_octave(uint8_t note_index_to_remove) {
     // No notes left playing
     osc_note_velocity[0] = 0;
     osc_note_velocity[1] = 0;
+    osc_note_velocity[2] = 0;
 }
 
 static void note_on_octave(uint8_t k, uint8_t v) {
@@ -607,6 +628,8 @@ static void note_on_octave(uint8_t k, uint8_t v) {
     osc_note_velocity[0] = v;
     osc_note_index[1] = k - 12;
     osc_note_velocity[1] = v;
+    osc_note_index[2] = k;
+    osc_note_velocity[2] = v;
 }
 
 static void all_notes_off() {
@@ -932,6 +955,7 @@ static void mod_wave() {
 
 static void init_bass() {
     global_config.mode = MODE_OCTAVE;
+    global.osc[2].wave = WAVE_NOISE;
 
     for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
@@ -948,6 +972,11 @@ static void init_bass() {
         // No pitch LFO
         adsr_configure(&osc->pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
         triangle_configure(&osc->pitch_lfo_config, 0, 0, 0, 1);
+
+        // XXX
+        if (i < 2) {
+            adsr_configure(&osc->amp_env_config, 0, 1, 0, 1, 0, 1, 0);
+        }
     }
 
     // No arp
@@ -1256,7 +1285,7 @@ static void update_output(void) {
 ISR (TCA0_OVF_vect) 
 {
     TCA0.SINGLE.INTFLAGS |= TCA_SINGLE_OVF_bm;
-    if (osc_handle_timer(&global.osc[0], &global.mixer_inputs[0], &TCA0.SINGLE.PER)) {
+    if (osc_handle_timer_pulse(&global.osc[0], &global.mixer_inputs[0], &TCA0.SINGLE.PER)) {
         update_output();
     }
 }
@@ -1264,7 +1293,7 @@ ISR (TCA0_OVF_vect)
 ISR (TCB0_INT_vect) 
 {
     TCB0.INTFLAGS |= TCB_CAPT_bm;
-    if (osc_handle_timer(&global.osc[1], &global.mixer_inputs[1], &TCB0.CCMP)) {
+    if (osc_handle_timer_pulse(&global.osc[1], &global.mixer_inputs[1], &TCB0.CCMP)) {
         update_output();
     }
 }
@@ -1272,7 +1301,16 @@ ISR (TCB0_INT_vect)
 ISR (TCB1_INT_vect) 
 {
     TCB1.INTFLAGS |= TCB_CAPT_bm;
-    if (osc_handle_timer(&global.osc[2], &global.mixer_inputs[2], &TCB1.CCMP)) {
-        update_output();
+    switch (global.osc[2].wave) {
+        case WAVE_PULSE:
+            if (osc_handle_timer_pulse(&global.osc[2], &global.mixer_inputs[2], &TCB1.CCMP)) {
+                update_output();
+            }
+            break;
+        case WAVE_NOISE:
+            if (osc_handle_timer_noise(&global.osc[2], &global.mixer_inputs[2], &TCB1.CCMP)) {
+                update_output();
+            }
+            break;
     }
 }
