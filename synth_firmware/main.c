@@ -24,6 +24,8 @@ static void note_off(uint8_t k);
 #define NO_NOTE 255
 #define NO_OSC 255
 
+#define NO_GLIDE_INCREMENT 10000
+
 // Notes currently held down, and how they are being voiced
 static uint8_t note_index[N_NOTES];
 static uint8_t note_velocity[N_NOTES];
@@ -279,6 +281,46 @@ static int8_t arp_update(struct arp_state *state, const struct arp_config *confi
     return state->note;
 }
 
+struct glide_config {
+    int16_t increment;
+};
+
+struct glide_state {
+    int16_t last_pitch;
+    uint8_t last_gate;
+};
+
+static void glide_configure(struct glide_config *config, int16_t increment) {
+    config->increment = increment;
+}
+
+static void glide_init(struct glide_state *state, const struct glide_config *config) {
+    (void)config;
+    state->last_gate = 0;
+}
+
+static int16_t glide_update(struct glide_state *state, const struct glide_config *config, int16_t target_pitch, uint8_t gate) {
+    if (gate && gate != state->last_gate) {
+        state->last_pitch = target_pitch;
+    } else {
+        if (state->last_pitch < target_pitch) {
+            if (state->last_pitch > target_pitch - config->increment) {
+                state->last_pitch = target_pitch;
+            } else {
+                state->last_pitch += config->increment;
+            }
+        } else {
+            if (state->last_pitch < target_pitch + config->increment) {
+                state->last_pitch = target_pitch;
+            } else {
+                state->last_pitch -= config->increment;
+            }
+        }
+    }
+    state->last_gate = gate;
+    return state->last_pitch;
+}
+
 static void rx(uint8_t byte) {
     static enum {
         UNKNOWN,
@@ -372,12 +414,14 @@ struct osc_state {
     struct adsr_config pitch_env_config;
     struct triangle_config pitch_lfo_config;
     struct triangle_config pwm_lfo_config;
+    struct glide_config glide_config;
 
     struct adsr_state amp_env;
     struct triangle_state amp_lfo;
     struct adsr_state pitch_env;
     struct triangle_state pitch_lfo;
     struct triangle_state pwm_lfo;
+    struct glide_state glide;
 
     // Output stuff
     int8_t amplitude;
@@ -442,6 +486,7 @@ static void global_osc_init() {
         adsr_init(&global.osc[i].pitch_env, &global.osc[i].pitch_env_config);
         triangle_init(&global.osc[i].pitch_lfo, &global.osc[i].pitch_lfo_config);
         triangle_init(&global.osc[i].pwm_lfo, &global.osc[i].pwm_lfo_config);
+        glide_init(&global.osc[i].glide, &global.osc[i].glide_config);
     }
 }
 
@@ -761,6 +806,9 @@ static void init_basic() {
         // No PWM
         triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
 
+        // No glide
+        glide_configure(&osc->glide_config, NO_GLIDE_INCREMENT);
+
         // Basic amplitude envelope, no amplitude LFO
         adsr_configure(&osc->amp_env_config, 0, 1, 64 << 8, 1, 64 << 8, 100, 0);
         osc->amp_env_config.s_value = 0;
@@ -802,6 +850,9 @@ static void init_chorus() {
         // No PWM
         triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
 
+        // No glide
+        glide_configure(&osc->glide_config, NO_GLIDE_INCREMENT);
+
         // Basic amplitude envelope
         adsr_configure(&osc->amp_env_config, 0, 1, 127 << 8, 1000, 63 << 8, 100, 0);
 
@@ -841,6 +892,9 @@ static void init_wave() {
 
     for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
+        // No glide
+        glide_configure(&osc->glide_config, NO_GLIDE_INCREMENT);
+
         // Constant PWM
         //triangle_configure(&osc->pwm_lfo_config, 0, -96 << 8, 96 << 8, 10000);
         triangle_configure(&osc->pwm_lfo_config, -120 << 8, 120 << 8, -120 << 8, 800);
@@ -881,6 +935,9 @@ static void init_bass() {
 
     for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
+        // No glide
+        glide_configure(&osc->glide_config, NO_GLIDE_INCREMENT);
+
         // PWM on upper octave
         triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
 
@@ -900,6 +957,9 @@ static void init_bass() {
 static void mod_bass() {
     for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
+
+        // No glide
+        glide_configure(&osc->glide_config, NO_GLIDE_INCREMENT);
 
         if (i == 0) {
             // PWM based on depth knob
@@ -935,6 +995,7 @@ static void init_empty() {
 
     for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
+        glide_configure(&osc->glide_config, NO_GLIDE_INCREMENT);
         triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
 
         adsr_configure(&osc->amp_env_config, 0, 1, 0, 1, 0, 1, 0);
@@ -1141,12 +1202,13 @@ static void update_modulation() {
         }
 
         // Advance envelope generators
-        int16_t amp_env_value = adsr_update(&osc->amp_env, &global.osc[i].amp_env_config, gate);
-        int16_t pitch_env_value = adsr_update(&osc->pitch_env, &global.osc[i].pitch_env_config, gate);
+        int16_t amp_env_value = adsr_update(&osc->amp_env, &osc->amp_env_config, gate);
+        int16_t pitch_env_value = adsr_update(&osc->pitch_env, &osc->pitch_env_config, gate);
+        int16_t glided_pitch = glide_update(&osc->glide, &osc->glide_config, (osc->triggered_note + arp_note) << 8, notes_held);
         int16_t pitch_adjust = ((int32_t)pitch_env_value * pitch_lfo_value) >> 15;
 
         // Calculate timer periods
-        uint16_t output_period = period(((osc->triggered_note + arp_note) << 8) + pitch_adjust);
+        uint16_t output_period = period(glided_pitch + pitch_adjust);
         if (output_period < 2 * MIN_PER) {
             output_period = 2 * MIN_PER;
         }
