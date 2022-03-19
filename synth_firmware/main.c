@@ -355,25 +355,6 @@ ISR (USART0_RXC_vect)
     rx(USART0.RXDATAL);
 }
 
-static void update_osc_from_notes() {
-    //for (int i = 0; i < N_NOTES; i++) {
-    //    uint8_t osc_index = note_osc[i];
-    //    if (osc_index != NO_OSC) {
-    //        osc_note_index[osc_index] = note_index[i];
-    //        osc_note_velocity[osc_index] = note_velocity[i];
-    //    }
-    //}
-
-    //for (int i = 0; i < N_NOTES; i++) {
-    //    if (note_velocity[i] > 0) {
-    //        osc_note_index[0] = note_index[i];
-    //        osc_note_velocity[0] = note_velocity[i];
-    //        return;
-    //    }
-    //}
-    //osc_note_velocity[0] = 0;
-}
-
 static void update_modulation();
 
 struct osc_state {
@@ -465,45 +446,34 @@ static void global_osc_init() {
 }
 
 static void note_off_mono(uint8_t note_index_to_remove) {
-    // TODO
-    //if (note_index[0] == k && note_velocity[0] > 0) {
-    //    note_velocity[0] = 0;
-    //    update_osc_from_notes(); // XXX
-    //}
+    note_velocity[note_index_to_remove] = 0;
+
+    // See if there's another note playing
+    for (int i = 0; i < N_NOTES; i++) {
+        if (note_velocity[i] > 0) {
+            osc_note_index[0] = note_index[i];
+            osc_note_velocity[0] = note_velocity[i];
+            return;
+        }
+    }
+
+    // No notes left playing
+    osc_note_velocity[0] = 0;
 }
 
 static void note_on_mono(uint8_t k, uint8_t v) {
-    // TODO
-    //note_index[0] = k;
-    //note_velocity[0] = v;
-    //note_osc[0] = 0;
-    //update_osc_from_notes(); // XXX
+    note_index[0] = k;
+    note_velocity[0] = v;
+
+    osc_note_index[0] = k;
+    osc_note_velocity[0] = v;
 }
 
 static void note_off_poly(uint8_t note_index_to_remove) {
-    // Mode specific code here (as a function of note_index_to_remove)
-
-    // TMP
-    //note_velocity[note_index_to_remove] = 0;
-    //int i;
-    //for (i = 0; i < N_NOTES; i++) {
-    //    if (note_velocity[i] > 0) {
-    //        osc_note_index[0] = note_index[i];
-    //        osc_note_velocity[0] = note_velocity[i];
-    //        break;
-    //    }
-    //}
-    //if (i == N_NOTES) {
-    //    osc_note_velocity[0] = 0;
-    //}
-    // END TMP
-
     uint8_t osc_index = note_osc[note_index_to_remove];
     if (osc_index != NO_OSC) {
         osc_note_velocity[osc_index] = 0;
     }
-
-    // End mode-specific code
 }
 
 static void assign_osc_poly() {
@@ -549,15 +519,6 @@ static void assign_osc_poly() {
 }
 
 static void note_on_poly(uint8_t k, uint8_t v) {
-    // Begin mode-specific code
-
-    // TMP
-    //note_index[0] = k;
-    //note_velocity[0] = v;
-    //osc_note_index[0] = note_index[0];
-    //osc_note_velocity[0] = note_velocity[0];
-    // END TMP
-
     if (note_index[0] != k || note_osc[0] == NO_OSC) {
         // Find a suitable oscillator to use for this new note
         note_index[0] = k;
@@ -572,28 +533,35 @@ static void note_on_poly(uint8_t k, uint8_t v) {
     uint8_t osc_index = note_osc[0];
     osc_note_index[osc_index] = k;
     osc_note_velocity[osc_index] = v;
-
-    // End mode-specific code
 }
 
 static void note_off_octave(uint8_t note_index_to_remove) {
-    // TODO
-    //if (note_index[0] == k && note_velocity[0] > 0) {
-    //    note_velocity[0] = 0;
-    //    note_velocity[1] = 0;
-    //    update_osc_from_notes(); // XXX
-    //}
+    note_velocity[note_index_to_remove] = 0;
+
+    // See if there's another note playing
+    for (int i = 0; i < N_NOTES; i++) {
+        if (note_velocity[i] > 0) {
+            osc_note_index[0] = note_index[i];
+            osc_note_velocity[0] = note_velocity[i];
+            osc_note_index[1] = note_index[i] - 12;
+            osc_note_velocity[1] = note_velocity[i];
+            return;
+        }
+    }
+
+    // No notes left playing
+    osc_note_velocity[0] = 0;
+    osc_note_velocity[1] = 0;
 }
 
 static void note_on_octave(uint8_t k, uint8_t v) {
-    // TODO
-    //note_index[0] = k;
-    //note_velocity[0] = v;
-    //note_osc[0] = 0;
-    //note_index[1] = k - 12;
-    //note_velocity[1] = v;
-    //note_osc[1] = 1;
-    //update_osc_from_notes(); // XXX
+    note_index[0] = k;
+    note_velocity[0] = v;
+
+    osc_note_index[0] = k;
+    osc_note_velocity[0] = v;
+    osc_note_index[1] = k - 12;
+    osc_note_velocity[1] = v;
 }
 
 static void all_notes_off() {
