@@ -25,6 +25,7 @@ static void note_off(uint8_t k);
 #define NO_OSC 255
 
 #define NO_GLIDE_INCREMENT 10000
+#define WHITE_NOISE_PITCH 84
 
 // Notes currently held down, and how they are being voiced
 static uint8_t note_index[N_NOTES];
@@ -40,6 +41,7 @@ enum mode {
     MODE_MONO,
     MODE_POLY,
     MODE_OCTAVE,
+    MODE_NOISE,
 };
 
 enum wave {
@@ -126,7 +128,10 @@ static int16_t adsr_update(struct adsr_state *state, const struct adsr_config *c
     state->last_gate = gate;
     switch (state->mode) {
         case ADSR_OFF:
+            state->output = config->initial_value;
+            break;
         case ADSR_SUSTAIN:
+            state->output = config->s_value;
             break;
         case ADSR_ATTACK:
             if ((config->a_incr > 0 && state->output >= config->a_value - config->a_incr)
@@ -470,9 +475,9 @@ static bool osc_handle_timer_noise(struct osc_state *state, int8_t *out, volatil
     // returns the output signal level
     // and updates next_period with the time until this function should be called next
 
-    uint8_t r = rand8() & 1;
-    *next_period = r ? state->timer_period_high : state->timer_period_low;
-    *out = r ? state->amplitude : -state->amplitude;
+    *next_period = (state->t & 1) ? state->timer_period_high : state->timer_period_low;
+    *out = (rand8() & 1) ? state->amplitude : -state->amplitude;
+    state->t++;
     return true;
 }
 
@@ -617,7 +622,6 @@ static void note_off_octave(uint8_t note_index_to_remove) {
     // No notes left playing
     osc_note_velocity[0] = 0;
     osc_note_velocity[1] = 0;
-    osc_note_velocity[2] = 0;
 }
 
 static void note_on_octave(uint8_t k, uint8_t v) {
@@ -628,7 +632,34 @@ static void note_on_octave(uint8_t k, uint8_t v) {
     osc_note_velocity[0] = v;
     osc_note_index[1] = k - 12;
     osc_note_velocity[1] = v;
-    osc_note_index[2] = k;
+}
+
+static void note_off_noise(uint8_t note_index_to_remove) {
+    note_velocity[note_index_to_remove] = 0;
+
+    // See if there's another note playing
+    for (int i = 0; i < N_NOTES; i++) {
+        if (note_velocity[i] > 0) {
+            osc_note_index[0] = note_index[i];
+            osc_note_velocity[0] = note_velocity[i];
+            osc_note_index[2] = WHITE_NOISE_PITCH;
+            osc_note_velocity[2] = note_velocity[i];
+            return;
+        }
+    }
+
+    // No notes left playing
+    osc_note_velocity[0] = 0;
+    osc_note_velocity[2] = 0;
+}
+
+static void note_on_noise(uint8_t k, uint8_t v) {
+    note_index[0] = k;
+    note_velocity[0] = v;
+
+    osc_note_index[0] = k;
+    osc_note_velocity[0] = v;
+    osc_note_index[2] = WHITE_NOISE_PITCH;
     osc_note_velocity[2] = v;
 }
 
@@ -685,6 +716,9 @@ static void note_on(uint8_t k, uint8_t v) {
         case MODE_OCTAVE:
             note_on_octave(k, v);
             break;
+        case MODE_NOISE:
+            note_on_noise(k, v);
+            break;
     }
 }
 
@@ -712,6 +746,9 @@ static void note_off(uint8_t k) {
             break;
         case MODE_OCTAVE:
             note_off_octave(note_index_to_remove);
+            break;
+        case MODE_NOISE:
+            note_off_noise(note_index_to_remove);
             break;
     }
 
@@ -955,7 +992,6 @@ static void mod_wave() {
 
 static void init_bass() {
     global_config.mode = MODE_OCTAVE;
-    global.osc[2].wave = WAVE_NOISE;
 
     for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
@@ -973,8 +1009,8 @@ static void init_bass() {
         adsr_configure(&osc->pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
         triangle_configure(&osc->pitch_lfo_config, 0, 0, 0, 1);
 
-        // XXX
-        if (i < 2) {
+        // No noise channel
+        if (i == 2) {
             adsr_configure(&osc->amp_env_config, 0, 1, 0, 1, 0, 1, 0);
         }
     }
@@ -990,6 +1026,14 @@ static void mod_bass() {
         // No glide
         glide_configure(&osc->glide_config, NO_GLIDE_INCREMENT);
 
+        if (i == 0 || i == 1) {
+            // Vibrato speed and amount based on freq knob
+            int16_t vibrato_amt = knobs.freq << 4;
+            osc->pitch_lfo_config.low = -vibrato_amt;
+            osc->pitch_lfo_config.high = vibrato_amt;
+            osc->pitch_lfo_config.increment = ((uint16_t)knobs.freq * knobs.freq) >> 11;
+        }
+
         if (i == 0) {
             // PWM based on depth knob
             int16_t pwm_amt = (knobs.depth < 12 ? knobs.depth : 12) << 10;
@@ -997,12 +1041,6 @@ static void mod_bass() {
             osc->pwm_lfo_config.high = pwm_amt;
             osc->pwm_lfo_config.increment = knobs.depth >> 1;
         }
-
-        // Vibrato speed and amount based on freq knob
-        int16_t vibrato_amt = knobs.freq << 4;
-        osc->pitch_lfo_config.low = -vibrato_amt;
-        osc->pitch_lfo_config.high = vibrato_amt;
-        osc->pitch_lfo_config.increment = ((uint16_t)knobs.freq * knobs.freq) >> 11;
 
         if (i == 1) {
             // Bring in lower octave with depth knob
@@ -1015,6 +1053,74 @@ static void mod_bass() {
             osc->amp_lfo_config.low = -tremolo_amt;
             osc->amp_lfo_config.high = tremolo_amt;
             osc->amp_lfo_config.increment = ((uint16_t)knobs.freq * knobs.freq) >> 8;
+        }
+
+        if (i == 2) {
+            // Noise channel
+        }
+    }
+}
+
+static void init_dirty_bass() {
+    global_config.mode = MODE_OCTAVE;
+    global.osc[1].wave = WAVE_NOISE;
+
+    for (int i = 0; i < N_OSC; i++) {
+        struct osc_state *osc = &global.osc[i];
+
+        // Glide set by freq knob
+        glide_configure(&osc->glide_config, 1);
+
+        // A little PWM
+        triangle_configure(&osc->pwm_lfo_config, -120 << 8, 120 << 8, -120 << 8, 6000);
+
+        // Basic amplitude envelope, no amplitude LFO
+        adsr_configure(&osc->amp_env_config, 0, 1, 127 << 8, 100, 64 << 8, 600, 0);
+        // (A value will get overwrriten by mod routine, we set it to 127 here to get larger decay increment)
+        triangle_configure(&osc->amp_lfo_config, 0, 0, 0, 1);
+
+        // No pitch LFO
+        adsr_configure(&osc->pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
+        triangle_configure(&osc->pitch_lfo_config, 0, 0, 0, 1);
+
+        //if (i == 1) {
+        //    // No glide
+        //    glide_configure(&osc->glide_config, NO_GLIDE_INCREMENT);
+
+        //    // No PWM
+        //    triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
+
+        //    // Configure noise channel
+        //    adsr_configure(&osc->amp_env_config, 0, 100, 8 << 8, 1, 8 << 8, 300, 0);
+        //    triangle_configure(&osc->amp_lfo_config, 0, 0, 0, 1);
+
+        //    // No pitch LFO
+        //    adsr_configure(&osc->pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
+        //    triangle_configure(&osc->pitch_lfo_config, 0, 0, 0, 1);
+        //}
+    }
+
+    // No arp
+    arp_configure(&global_config.arp_config, NULL, 0, 0);
+}
+
+static void mod_dirty_bass() {
+    for (int i = 0; i < N_OSC; i++) {
+        struct osc_state *osc = &global.osc[i];
+
+        uint8_t vol1 = knobs.depth < 127 ? 127 : 255 - knobs.depth;
+        uint8_t vol2 = knobs.depth < 127 ? knobs.depth : 127;
+
+        osc->glide_config.increment = 64 - (knobs.freq >> 2);
+
+        if (i == 0) {
+            osc->amp_env_config.a_value = (int16_t)vol1 << 7;
+            osc->amp_env_config.s_value = (int16_t)vol1 << 7;
+        }
+
+        if (i == 1) {
+            osc->amp_env_config.a_value = (int16_t)vol2 << 7;
+            osc->amp_env_config.s_value = (int16_t)vol2 << 7;
         }
     }
 }
@@ -1115,8 +1221,8 @@ static const struct patches {
         .mod_fn = mod_bass,
     },
     {
-        .init_fn = init_empty,
-        .mod_fn = mod_empty,
+        .init_fn = init_dirty_bass,
+        .mod_fn = mod_dirty_bass,
     },
     {
         .init_fn = init_empty,
@@ -1285,16 +1391,34 @@ static void update_output(void) {
 ISR (TCA0_OVF_vect) 
 {
     TCA0.SINGLE.INTFLAGS |= TCA_SINGLE_OVF_bm;
-    if (osc_handle_timer_pulse(&global.osc[0], &global.mixer_inputs[0], &TCA0.SINGLE.PER)) {
-        update_output();
+    switch (global.osc[0].wave) {
+        case WAVE_PULSE:
+            if (osc_handle_timer_pulse(&global.osc[0], &global.mixer_inputs[0], &TCA0.SINGLE.PER)) {
+                update_output();
+            }
+            break;
+        case WAVE_NOISE:
+            if (osc_handle_timer_noise(&global.osc[0], &global.mixer_inputs[0], &TCA0.SINGLE.PER)) {
+                update_output();
+            }
+            break;
     }
 }
 
 ISR (TCB0_INT_vect) 
 {
     TCB0.INTFLAGS |= TCB_CAPT_bm;
-    if (osc_handle_timer_pulse(&global.osc[1], &global.mixer_inputs[1], &TCB0.CCMP)) {
-        update_output();
+    switch (global.osc[1].wave) {
+        case WAVE_PULSE:
+            if (osc_handle_timer_pulse(&global.osc[1], &global.mixer_inputs[1], &TCB0.CCMP)) {
+                update_output();
+            }
+            break;
+        case WAVE_NOISE:
+            if (osc_handle_timer_noise(&global.osc[1], &global.mixer_inputs[1], &TCB0.CCMP)) {
+                update_output();
+            }
+            break;
     }
 }
 
