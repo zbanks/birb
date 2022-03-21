@@ -315,7 +315,7 @@ static int16_t glide_update(struct glide_state *state, const struct glide_config
                 state->last_pitch += config->increment;
             }
         } else {
-            if (state->last_pitch < target_pitch + config->increment) {
+            if (state->last_pitch - config->increment < target_pitch) {
                 state->last_pitch = target_pitch;
             } else {
                 state->last_pitch -= config->increment;
@@ -452,10 +452,10 @@ static bool osc_handle_timer_pulse(struct osc_state *state, int8_t *out, volatil
     // returns the output signal level
     // and updates next_period with the time until this function should be called next
 
-    if (state->prescaler > PRESCALER) {
+    state->prescaler++;
+    if (state->prescaler >= PRESCALER) {
         state->prescaler = 0;
     } else {
-        state->prescaler++;
         return false;
     }
 
@@ -466,24 +466,24 @@ static bool osc_handle_timer_pulse(struct osc_state *state, int8_t *out, volatil
 }
 
 static bool osc_handle_timer_noise(struct osc_state *state, int8_t *out, volatile uint16_t *next_period) {
-    // For a pulse wave, this function
+    // For a noise wave, this function
     // returns the output signal level
     // and updates next_period with the time until this function should be called next
 
-    *next_period = (state->t & 1) ? state->timer_period_high : state->timer_period_low;
-    *out = state->amplitude * (rand8() & 1) - 2 * state->amplitude;
-    state->t++;
+    uint8_t r = rand8() & 1;
+    *next_period = r ? state->timer_period_high : state->timer_period_low;
+    *out = r ? state->amplitude : -state->amplitude;
     return true;
 }
 
 static uint16_t period(int16_t note) {
     int16_t adj_note = note + (((OCTAVE_OFFSET) * 12) << 8);
     // Set osc as per new note
-    if (adj_note < 0) { // Highest note to avoid deadlock
+    if (adj_note < 0) {
         adj_note = 0;
     }
-    if (adj_note > (126 << 8)) { // Highest note to avoid deadlock
-        adj_note = (126 << 8);
+    if (adj_note > (72 << 8)) {
+        adj_note = (72 << 8);
     }
     uint8_t ix = adj_note >> 8;
     uint16_t per_low = PERIOD_LKUP[ix];

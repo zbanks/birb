@@ -16,6 +16,7 @@ OBJECTS = $(patsubst %.c,%.o,$(C_SRC))
 MCU=attiny1614
 CFLAGS = -B /home/eric/avr-test/sandbox/gcc/ -mmcu=$(MCU) -Wall -Os -ggdb3
 CFLAGS += -fdata-sections -ffunction-sections
+CFLAGS += -fshort-enums
 CFLAGS += -Wall -Wextra
 LFLAGS = $(CFLAGS) -Wl,-Map=main.map -Wl,--defsym -Wl,__TEXT_REGION_ORIGIN__=0x0800
 LIBRARIES =
