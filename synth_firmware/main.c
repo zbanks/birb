@@ -51,17 +51,6 @@ enum wave {
 
 static uint8_t mod = 0;
 
-static int8_t sadd(int8_t x, int8_t y) {
-    int16_t result = x + y;
-    if (result > 127) {
-        return 127;
-    } else if (result < -128) {
-        return -128;
-    } else {
-        return (int8_t)result;
-    }
-}
-
 struct adsr_config {
     int16_t initial_value;
     int16_t a_incr;
@@ -425,6 +414,7 @@ struct osc_state {
     struct triangle_config amp_lfo_config;
     struct adsr_config pitch_env_config;
     struct triangle_config pitch_lfo_config;
+    struct adsr_config pwm_env_config;
     struct triangle_config pwm_lfo_config;
     struct glide_config glide_config;
 
@@ -432,6 +422,7 @@ struct osc_state {
     struct triangle_state amp_lfo;
     struct adsr_state pitch_env;
     struct triangle_state pitch_lfo;
+    struct adsr_state pwm_env;
     struct triangle_state pwm_lfo;
     struct glide_state glide;
 
@@ -510,6 +501,7 @@ static void global_osc_init() {
         triangle_init(&global.osc[i].amp_lfo, &global.osc[i].amp_lfo_config);
         adsr_init(&global.osc[i].pitch_env, &global.osc[i].pitch_env_config);
         triangle_init(&global.osc[i].pitch_lfo, &global.osc[i].pitch_lfo_config);
+        adsr_init(&global.osc[i].pwm_env, &global.osc[i].pwm_env_config);
         triangle_init(&global.osc[i].pwm_lfo, &global.osc[i].pwm_lfo_config);
         glide_init(&global.osc[i].glide, &global.osc[i].glide_config);
     }
@@ -551,7 +543,15 @@ static void assign_osc_poly() {
 
     uint8_t osc_index = 0;
 
-    // First, look a completely quiet oscillators
+    // First, look for osctillators matching the note
+    for (int i = 0; i < N_OSC; i++) {
+        if (osc_note_index[i] == note_index[0]) {
+            osc_index = i;
+            goto found;
+        }
+    }
+
+    // First, look for completely quiet oscillators
     for (int i = 0; i < N_OSC; i++) {
         if (osc_note_velocity[i] == 0 && global.osc[i].amplitude == 0) {
             osc_index = i;
@@ -589,16 +589,10 @@ static void assign_osc_poly() {
 }
 
 static void note_on_poly(uint8_t k, uint8_t v) {
-    if (note_index[0] != k || note_osc[0] == NO_OSC) {
-        // Find a suitable oscillator to use for this new note
-        note_index[0] = k;
-        note_velocity[0] = v;
-        assign_osc_poly();
-    } else {
-        // Re-use the same oscillator if it's the same note
-        // (i.e. don't allow oscillators in unison)
-        note_velocity[0] = v;
-    }
+    // Find a suitable oscillator to use for this new note
+    note_index[0] = k;
+    note_velocity[0] = v;
+    assign_osc_poly();
 
     uint8_t osc_index = note_osc[0];
     osc_note_index[osc_index] = k;
@@ -858,21 +852,39 @@ static struct knobs {
     uint8_t freq;
 } knobs;
 
+static void init_empty() {
+    global_config.mode = MODE_POLY;
+
+    for (int i = 0; i < N_OSC; i++) {
+        struct osc_state *osc = &global.osc[i];
+        osc->wave = WAVE_PULSE;
+
+        glide_configure(&osc->glide_config, NO_GLIDE_INCREMENT);
+        adsr_configure(&osc->pwm_env_config, 0, 1, 0, 1, 0, 1, 0);
+        triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
+
+        adsr_configure(&osc->amp_env_config, 0, 1, 0, 1, 0, 1, 0);
+        osc->amp_env_config.s_value = 0;
+        triangle_configure(&osc->amp_lfo_config, 0, 0, 0, 1);
+
+        adsr_configure(&osc->pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
+        triangle_configure(&osc->pitch_lfo_config, 0, 0, 0, 1);
+    }
+
+    arp_configure(&global_config.arp_config, NULL, 0, 0);
+}
+
+static void mod_empty() {
+}
+
 static void init_basic() {
     global_config.mode = MODE_POLY;
 
     for (int i=0; i<N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
-        // No PWM
-        triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
-
-        // No glide
-        glide_configure(&osc->glide_config, NO_GLIDE_INCREMENT);
-
         // Basic amplitude envelope, no amplitude LFO
         adsr_configure(&osc->amp_env_config, 0, 1, 64 << 8, 1, 64 << 8, 100, 0);
         osc->amp_env_config.s_value = 0;
-        triangle_configure(&osc->amp_lfo_config, 0, 0, 0, 1);
 
         // Add some vibrato
         const int16_t et = 6000;
@@ -882,16 +894,14 @@ static void init_basic() {
         const int16_t ov = 200;
         triangle_configure(&osc->pitch_lfo_config, -ov, ov, 0, ot);
     }
-
-    // No arp
-    arp_configure(&global_config.arp_config, NULL, 0, 0);
 }
 
 static void mod_basic() {
     for (int i=0; i<N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
+
         // Decay based on depth knob
-        osc->amp_env_config.d_incr = -(knobs.depth < 127 ? (144 - knobs.depth) : (255 - knobs.depth) >> 3);
+        osc->amp_env_config.d_incr = -(knobs.depth < 127 ? ((int16_t)(127 - knobs.depth) * (127 - knobs.depth) >> 6) + 16 : (255 - knobs.depth) >> 3);
         osc->amp_env_config.s_value = knobs.depth < 255 ? 0 : 64 << 8;
 
         // Vibrato speed and amount based on freq knob
@@ -903,29 +913,12 @@ static void mod_basic() {
 }
 
 static void init_chorus() {
-    global_config.mode = MODE_POLY;
-
     for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
-        // No PWM
-        triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
-
-        // No glide
-        glide_configure(&osc->glide_config, NO_GLIDE_INCREMENT);
 
         // Basic amplitude envelope
         adsr_configure(&osc->amp_env_config, 0, 1, 127 << 8, 1000, 63 << 8, 100, 0);
-
-        // Amplitude LFO set up in mod function
-        triangle_configure(&osc->amp_lfo_config, 0, 0, 0, 1);
-
-        // No pitch LFO
-        adsr_configure(&osc->pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
-        triangle_configure(&osc->pitch_lfo_config, 0, 0, 0, 1);
     }
-
-    // No arp
-    arp_configure(&global_config.arp_config, NULL, 0, 0);
 }
 
 static void mod_chorus() {
@@ -948,10 +941,10 @@ static void mod_chorus() {
 }
 
 static void init_wave() {
-    global_config.mode = MODE_POLY;
-
     for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
+        osc->wave = WAVE_PULSE;
+
         // No glide
         glide_configure(&osc->glide_config, NO_GLIDE_INCREMENT);
 
@@ -990,11 +983,13 @@ static void mod_wave() {
     }
 }
 
-static void init_bass() {
+static void init_wobble_bass() {
     global_config.mode = MODE_OCTAVE;
 
     for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
+        osc->wave = WAVE_PULSE;
+
         // No glide
         glide_configure(&osc->glide_config, NO_GLIDE_INCREMENT);
 
@@ -1019,7 +1014,7 @@ static void init_bass() {
     arp_configure(&global_config.arp_config, NULL, 0, 0);
 }
 
-static void mod_bass() {
+static void mod_wobble_bass() {
     for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
 
@@ -1047,13 +1042,13 @@ static void mod_bass() {
             uint16_t vol = knobs.depth < 64 ? knobs.depth : 64;
             osc->amp_env_config.a_value = vol << 8;
             osc->amp_env_config.s_value = vol << 8;
-
-            // Tremolo on lower octave
-            int16_t tremolo_amt = (knobs.freq < 127 ? knobs.freq : 127) << 7;
-            osc->amp_lfo_config.low = -tremolo_amt;
-            osc->amp_lfo_config.high = tremolo_amt;
-            osc->amp_lfo_config.increment = ((uint16_t)knobs.freq * knobs.freq) >> 8;
         }
+
+        // Tremolo (wobble)
+        int16_t tremolo_amt = (knobs.freq < 127 ? knobs.freq : 127) << 7;
+        osc->amp_lfo_config.low = -tremolo_amt;
+        osc->amp_lfo_config.high = tremolo_amt;
+        osc->amp_lfo_config.increment = ((uint16_t)knobs.freq * knobs.freq) >> 8;
 
         if (i == 2) {
             // Noise channel
@@ -1063,10 +1058,14 @@ static void mod_bass() {
 
 static void init_dirty_bass() {
     global_config.mode = MODE_OCTAVE;
-    global.osc[1].wave = WAVE_NOISE;
 
     for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
+        if (i == 1) {
+            osc->wave = WAVE_NOISE;
+        } else {
+            osc->wave = WAVE_PULSE;
+        }
 
         // Glide set by freq knob
         glide_configure(&osc->glide_config, 1);
@@ -1082,22 +1081,6 @@ static void init_dirty_bass() {
         // No pitch LFO
         adsr_configure(&osc->pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
         triangle_configure(&osc->pitch_lfo_config, 0, 0, 0, 1);
-
-        //if (i == 1) {
-        //    // No glide
-        //    glide_configure(&osc->glide_config, NO_GLIDE_INCREMENT);
-
-        //    // No PWM
-        //    triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
-
-        //    // Configure noise channel
-        //    adsr_configure(&osc->amp_env_config, 0, 100, 8 << 8, 1, 8 << 8, 300, 0);
-        //    triangle_configure(&osc->amp_lfo_config, 0, 0, 0, 1);
-
-        //    // No pitch LFO
-        //    adsr_configure(&osc->pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
-        //    triangle_configure(&osc->pitch_lfo_config, 0, 0, 0, 1);
-        //}
     }
 
     // No arp
@@ -1125,26 +1108,43 @@ static void mod_dirty_bass() {
     }
 }
 
-static void init_empty() {
-    global_config.mode = MODE_POLY;
+static void init_pluck_bass() {
+    global_config.mode = MODE_OCTAVE;
 
     for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
-        glide_configure(&osc->glide_config, NO_GLIDE_INCREMENT);
-        triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
 
-        adsr_configure(&osc->amp_env_config, 0, 1, 0, 1, 0, 1, 0);
+        // Basic amplitude envelope, no amplitude LFO
+        adsr_configure(&osc->amp_env_config, 0, 1, 127 << 8, 300, 64 << 8, 100, 0);
         osc->amp_env_config.s_value = 0;
-        triangle_configure(&osc->amp_lfo_config, 0, 0, 0, 1);
 
-        adsr_configure(&osc->pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
-        triangle_configure(&osc->pitch_lfo_config, 0, 0, 0, 1);
+        // Pluck PWM
+        if (i == 0) {
+            adsr_configure(&osc->pwm_env_config, 127 << 8, 1, 127 << 8, 300, 64 << 8, 100, 0);
+            osc->pwm_env_config.s_value = 0;
+        }
     }
-
-    arp_configure(&global_config.arp_config, NULL, 0, 0);
 }
 
-static void mod_empty() {
+static void mod_pluck_bass() {
+    for (int i = 0; i < N_OSC; i++) {
+        struct osc_state *osc = &global.osc[i];
+
+        // PWM depth based on depth knob
+        if (i == 0) {
+            osc->pwm_env_config.initial_value = (int16_t)(knobs.depth) << 7;
+            osc->pwm_env_config.a_value = osc->pwm_env_config.initial_value;
+        }
+
+        // Decay based on freq knob
+        uint16_t base_amt = 255 - knobs.freq;
+        uint16_t amp_amt = (base_amt * 255) >> 11;
+        uint16_t pwm_amt = (base_amt * knobs.depth) >> 11;
+        osc->amp_env_config.d_incr = -(int16_t)amp_amt;
+        osc->amp_env_config.r_incr = -(int16_t)amp_amt;
+        osc->pwm_env_config.d_incr = -(int16_t)pwm_amt;
+        osc->pwm_env_config.r_incr = -(int16_t)pwm_amt;
+    }
 }
 /*
 
@@ -1217,20 +1217,20 @@ static const struct patches {
         .mod_fn = mod_wave,
     },
     {
-        .init_fn = init_bass,
-        .mod_fn = mod_bass,
+        .init_fn = init_wobble_bass,
+        .mod_fn = mod_wobble_bass,
     },
     {
         .init_fn = init_dirty_bass,
         .mod_fn = mod_dirty_bass,
     },
     {
-        .init_fn = init_empty,
+        .init_fn = init_empty, // XXX hardware bug: skip this slot
         .mod_fn = mod_empty,
     },
     {
-        .init_fn = init_empty,
-        .mod_fn = mod_empty,
+        .init_fn = init_pluck_bass,
+        .mod_fn = mod_pluck_bass,
     },
     {
         .init_fn = init_empty,
@@ -1255,6 +1255,7 @@ static const struct patches {
 };
 
 static void patch_init() {
+    init_empty();
     patches[knobs.select].init_fn();
 }
 
@@ -1320,10 +1321,10 @@ static void update_modulation() {
         uint8_t velocity = osc_note_velocity[i];
 
         // Advance pwm LFO
-        uint8_t pwm_lfo_value = 127 + (triangle_update(&osc->pwm_lfo, &global.osc[i].pwm_lfo_config, notes_held) >> 8);
+        uint16_t pwm_lfo_value = triangle_update(&osc->pwm_lfo, &global.osc[i].pwm_lfo_config, notes_held);
 
         // Advance amplitude LFO
-        uint16_t amp_lfo_value = 32767 + triangle_update(&osc->amp_lfo, &global.osc[i].amp_lfo_config, notes_held);
+        uint16_t amp_lfo_value = 32768 + (uint16_t)triangle_update(&osc->amp_lfo, &global.osc[i].amp_lfo_config, notes_held);
 
         // Advance pitch LFO
         int16_t pitch_lfo_value = triangle_update(&osc->pitch_lfo, &global.osc[i].pitch_lfo_config, notes_held);
@@ -1337,6 +1338,7 @@ static void update_modulation() {
         }
 
         // Advance envelope generators
+        int16_t pwm_env_value = adsr_update(&osc->pwm_env, &osc->pwm_env_config, gate);
         int16_t amp_env_value = adsr_update(&osc->amp_env, &osc->amp_env_config, gate);
         int16_t pitch_env_value = adsr_update(&osc->pitch_env, &osc->pitch_env_config, gate);
         int16_t glided_pitch = glide_update(&osc->glide, &osc->glide_config, (osc->triggered_note + arp_note) << 8, notes_held);
@@ -1347,7 +1349,8 @@ static void update_modulation() {
         if (output_period < 2 * MIN_PER) {
             output_period = 2 * MIN_PER;
         }
-        uint16_t per1 = ((uint32_t)output_period * pwm_lfo_value) >> 8;
+        uint16_t pulse_width_multiplier = 32768 + (uint16_t)(pwm_env_value + pwm_lfo_value);
+        uint16_t per1 = ((uint32_t)output_period * pulse_width_multiplier) >> 16;
         uint16_t per2 = output_period - per1;
         if (per1 < MIN_PER) {
             per1 = MIN_PER;
