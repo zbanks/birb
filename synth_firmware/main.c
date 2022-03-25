@@ -988,7 +988,41 @@ static void mod_wave() {
     }
 }
 
+static void init_bass() {
+    global_config_adjust_range(1);
+    global_config.mode = MODE_MONO;
+
+    for (int i = 0; i < N_OSC; i++) {
+        struct osc_state *osc = &global.osc[i];
+        // Basic amplitude envelope, no amplitude LFO
+        adsr_configure(&osc->amp_env_config, 0, 1, 64 << 8, 1, 64 << 8, 100, 0);
+
+        // Glide set by freq knob
+        glide_configure(&osc->glide_config, 1);
+    }
+
+    // No arp
+    arp_configure(&global_config.arp_config, NULL, 0, 0);
+}
+
+static void mod_bass() {
+    for (int i = 0; i < N_OSC; i++) {
+        struct osc_state *osc = &global.osc[i];
+
+        // Pulse width based on depth knob
+        if (i == 0) {
+            osc->pwm_env_config.initial_value = (int16_t)(255 - knobs.depth) << 7;
+            osc->pwm_env_config.a_value = osc->pwm_env_config.initial_value;
+            osc->pwm_env_config.s_value = osc->pwm_env_config.initial_value;
+            osc->pwm_env_config.final_value = osc->pwm_env_config.initial_value;
+        }
+
+        osc->glide_config.increment = 64 - (knobs.freq >> 2);
+    }
+}
+
 static void init_wobble_bass() {
+    global_config_adjust_range(1);
     global_config.mode = MODE_OCTAVE;
 
     for (int i = 0; i < N_OSC; i++) {
@@ -1061,60 +1095,8 @@ static void mod_wobble_bass() {
     }
 }
 
-static void init_dirty_bass() {
-    global_config.mode = MODE_OCTAVE;
-
-    for (int i = 0; i < N_OSC; i++) {
-        struct osc_state *osc = &global.osc[i];
-        if (i == 1) {
-            osc->wave = WAVE_NOISE;
-        } else {
-            osc->wave = WAVE_PULSE;
-        }
-
-        // Glide set by freq knob
-        glide_configure(&osc->glide_config, 1);
-
-        // A little PWM
-        triangle_configure(&osc->pwm_lfo_config, -120 << 8, 120 << 8, -120 << 8, 6000);
-
-        // Basic amplitude envelope, no amplitude LFO
-        adsr_configure(&osc->amp_env_config, 0, 1, 127 << 8, 100, 64 << 8, 600, 0);
-        // (A value will get overwrriten by mod routine, we set it to 127 here to get larger decay increment)
-        triangle_configure(&osc->amp_lfo_config, 0, 0, 0, 1);
-
-        // No pitch LFO
-        adsr_configure(&osc->pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
-        triangle_configure(&osc->pitch_lfo_config, 0, 0, 0, 1);
-    }
-
-    // No arp
-    arp_configure(&global_config.arp_config, NULL, 0, 0);
-}
-
-static void mod_dirty_bass() {
-    for (int i = 0; i < N_OSC; i++) {
-        struct osc_state *osc = &global.osc[i];
-
-        uint8_t vol1 = knobs.depth < 127 ? 127 : 255 - knobs.depth;
-        uint8_t vol2 = knobs.depth < 127 ? knobs.depth : 127;
-
-        osc->glide_config.increment = 64 - (knobs.freq >> 2);
-
-        if (i == 0) {
-            osc->amp_env_config.a_value = (int16_t)vol1 << 7;
-            osc->amp_env_config.s_value = (int16_t)vol1 << 7;
-        }
-
-        if (i == 1) {
-            osc->amp_env_config.a_value = (int16_t)vol2 << 7;
-            osc->amp_env_config.s_value = (int16_t)vol2 << 7;
-        }
-    }
-}
-
 static void init_pluck_bass() {
-    global_config_adjust_range(1); // Only one octave up since this is a bass patch
+    global_config_adjust_range(1);
     global_config.mode = MODE_OCTAVE;
 
     for (int i = 0; i < N_OSC; i++) {
@@ -1223,12 +1205,12 @@ static const struct patches {
         .mod_fn = mod_wave,
     },
     {
-        .init_fn = init_wobble_bass,
-        .mod_fn = mod_wobble_bass,
+        .init_fn = init_bass,
+        .mod_fn = mod_bass,
     },
     {
-        .init_fn = init_dirty_bass,
-        .mod_fn = mod_dirty_bass,
+        .init_fn = init_wobble_bass,
+        .mod_fn = mod_wobble_bass,
     },
     {
         .init_fn = init_empty, // XXX hardware bug: skip this slot
