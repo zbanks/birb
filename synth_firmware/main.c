@@ -7,11 +7,13 @@
 #include <stdlib.h>
 
 #define MIDI_CHANNEL 0
-#define PRESCALER 4
-#define OCTAVE_OFFSET -2
 
-// This lkup uses 16 counts per period
-const uint16_t PERIOD_LKUP[] = {
+// For proper tuning, ensure PRESCALER * (2 ^ OCTAVE_OFFSET) = COUNTS_PER_PERIOD
+// (COUNTS_PER_PERIOD = 16 for the lookup table below)
+
+// This lookup table uses 16 counts per period
+#define LOOKUP_COUNTS_PER_PERIOD 16
+const uint16_t PERIOD_LOOKUP[] = {
 38223, 36077, 34052, 32141, 30337, 28635, 27027, 25511, 24079, 22727, 21452, 20248, 19111, 18039, 17026, 16071, 15169, 14317, 13514, 12755, 12039, 11364, 10726, 10124, 9556, 9019, 8513, 8035, 7584, 7159, 6757, 6378, 6020, 5682, 5363, 5062, 4778, 4510, 4257, 4018, 3792, 3579, 3378, 3189, 3010, 2841, 2681, 2531, 2389, 2255, 2128, 2009, 1896, 1790, 1689, 1594, 1505, 1420, 1341, 1265, 1194, 1127, 1064, 1004, 948, 895, 845, 797, 752, 710, 670, 633, 597, 564, 532, 502, 474, 447, 422, 399, 376, 355, 335, 316, 299, 282, 266, 251, 237, 224, 211, 199, 188, 178, 168, 158, 149, 141, 133, 126, 119, 112, 106, 100, 94, 89, 84, 79, 75, 70, 67, 63, 59, 56, 53, 50, 47, 44, 42, 40, 37, 35, 33, 31, 30, 28, 26, };
 
 static void note_on(uint8_t k, uint8_t v);
@@ -435,6 +437,8 @@ struct osc_state {
 static struct global_config {
     enum mode mode;
     struct arp_config arp_config;
+    int16_t note_offset;
+    uint8_t prescaler;
 } global_config;
 
 static struct global_state {
@@ -443,13 +447,24 @@ static struct global_state {
     struct arp_state arp;
 } global;
 
+// Adjust the range of the instrument to include more low notes or more high notes
+static void global_config_adjust_range(int8_t octaves) {
+    global_config.note_offset = (int16_t)octaves * 12;
+
+    if (octaves >= 0) {
+        global_config.prescaler = LOOKUP_COUNTS_PER_PERIOD >> octaves;
+    } else {
+        global_config.prescaler = LOOKUP_COUNTS_PER_PERIOD << (-octaves);
+    }
+}
+
 static bool osc_handle_timer_pulse(struct osc_state *state, int8_t *out, volatile uint16_t *next_period) {
     // For a pulse wave, this function
     // returns the output signal level
     // and updates next_period with the time until this function should be called next
 
     state->prescaler++;
-    if (state->prescaler >= PRESCALER) {
+    if (state->prescaler >= global_config.prescaler) {
         state->prescaler = 0;
     } else {
         return false;
@@ -473,7 +488,7 @@ static bool osc_handle_timer_noise(struct osc_state *state, int8_t *out, volatil
 }
 
 static uint16_t period(int16_t note) {
-    int16_t adj_note = note + (((OCTAVE_OFFSET) * 12) << 8);
+    int16_t adj_note = note - (global_config.note_offset << 8);
     // Set osc as per new note
     if (adj_note < 0) {
         adj_note = 0;
@@ -482,8 +497,8 @@ static uint16_t period(int16_t note) {
         adj_note = (72 << 8);
     }
     uint8_t ix = adj_note >> 8;
-    uint16_t per_low = PERIOD_LKUP[ix];
-    uint16_t per_high = PERIOD_LKUP[ix + 1];
+    uint16_t per_low = PERIOD_LOOKUP[ix];
+    uint16_t per_high = PERIOD_LOOKUP[ix + 1];
     uint8_t frac = adj_note & 0xFF;
     uint16_t per = ((uint32_t)per_low * (256 - frac) + (uint32_t)per_high * frac) >> 8;
     return per;
@@ -757,7 +772,6 @@ static void note_off(uint8_t k) {
     note_osc[N_NOTES - 1] = NO_OSC;
 }
 
-
 int
 main (void)
 {
@@ -835,6 +849,11 @@ main (void)
     USART0.CTRLA |= USART_RXCIE_bm; // Receive data interrupt enable
 	USART0.CTRLB |= USART_RXEN_bm | USART_TXEN_bm;	// Enable rx and tx
 
+    // Call this before enabling the timer interrupts
+    // because otherwise the global prescaler will be 0
+    // which will deadlock the timer ISRs
+    update_modulation();
+
     sei();
 
     for(;;) {
@@ -855,6 +874,8 @@ static struct knobs {
 static void init_empty() {
     global_config.mode = MODE_POLY;
 
+    global_config_adjust_range(2); // Two octaves up
+
     for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
         osc->wave = WAVE_PULSE;
@@ -864,7 +885,6 @@ static void init_empty() {
         triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
 
         adsr_configure(&osc->amp_env_config, 0, 1, 0, 1, 0, 1, 0);
-        osc->amp_env_config.s_value = 0;
         triangle_configure(&osc->amp_lfo_config, 0, 0, 0, 1);
 
         adsr_configure(&osc->pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
@@ -945,27 +965,12 @@ static void init_wave() {
         struct osc_state *osc = &global.osc[i];
         osc->wave = WAVE_PULSE;
 
-        // No glide
-        glide_configure(&osc->glide_config, NO_GLIDE_INCREMENT);
-
         // Constant PWM
-        //triangle_configure(&osc->pwm_lfo_config, 0, -96 << 8, 96 << 8, 10000);
         triangle_configure(&osc->pwm_lfo_config, -120 << 8, 120 << 8, -120 << 8, 800);
-
-        // Basic amplitude envelope
-        adsr_configure(&osc->amp_env_config, 0, 1, 127 << 8, 1000, 63 << 8, 100, 0);
 
         // Basic amplitude envelope, no amplitude LFO
         adsr_configure(&osc->amp_env_config, 0, 100, 64 << 8, 1, 64 << 8, 100, 0);
-        triangle_configure(&osc->amp_lfo_config, 0, 0, 0, 1);
-
-        // No pitch LFO
-        adsr_configure(&osc->pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
-        triangle_configure(&osc->pitch_lfo_config, 0, 0, 0, 1);
     }
-
-    // No arp
-    arp_configure(&global_config.arp_config, NULL, 0, 0);
 }
 
 static void mod_wave() {
@@ -1109,6 +1114,7 @@ static void mod_dirty_bass() {
 }
 
 static void init_pluck_bass() {
+    global_config_adjust_range(1); // Only one octave up since this is a bass patch
     global_config.mode = MODE_OCTAVE;
 
     for (int i = 0; i < N_OSC; i++) {
@@ -1138,12 +1144,12 @@ static void mod_pluck_bass() {
 
         // Decay based on freq knob
         uint16_t base_amt = 255 - knobs.freq;
-        uint16_t amp_amt = (base_amt * 255) >> 11;
-        uint16_t pwm_amt = (base_amt * knobs.depth) >> 11;
-        osc->amp_env_config.d_incr = -(int16_t)amp_amt;
-        osc->amp_env_config.r_incr = -(int16_t)amp_amt;
-        osc->pwm_env_config.d_incr = -(int16_t)pwm_amt;
-        osc->pwm_env_config.r_incr = -(int16_t)pwm_amt;
+        uint16_t amp_amt = (base_amt * 255) >> 10;
+        uint16_t pwm_amt = (base_amt * knobs.depth) >> 10;
+        osc->amp_env_config.d_incr = -(int16_t)amp_amt - 1;
+        osc->amp_env_config.r_incr = -(int16_t)amp_amt - 1;
+        osc->pwm_env_config.d_incr = -(int16_t)pwm_amt - 1;
+        osc->pwm_env_config.r_incr = -(int16_t)pwm_amt - 1;
     }
 }
 /*
