@@ -102,6 +102,20 @@ static void adsr_configure(struct adsr_config *config, int16_t initial_value, in
     config->final_value = final_value;
 }
 
+static void adsr_configure_percussion(struct adsr_config *config, int16_t high_value, int16_t d_time, int16_t low_value) {
+    config->initial_value = low_value;
+    config->a_value = high_value;
+    config->s_value = low_value;
+    config->final_value = low_value;
+
+    config->a_incr = high_value - low_value; // Instant attack
+    config->d_incr = (low_value - high_value) / d_time;
+    if (config->d_incr == 0) {
+        config->d_incr = low_value > high_value ? 1 : -1;
+    }
+    config->r_incr = config->d_incr;
+}
+
 static void adsr_init(struct adsr_state *state, const struct adsr_config *config) {
     state->mode = ADSR_OFF;
     state->output = config->final_value;
@@ -178,6 +192,13 @@ static void triangle_configure(struct triangle_config *config, int16_t low, int1
     if (config->increment == 0) {
         config->increment = 1;
     }
+}
+
+static void triangle_configure_constant(struct triangle_config *config, int16_t value) {
+    config->low = value;
+    config->high = value;
+    config->initial_value = value;
+    config->increment = 0;
 }
 
 static void triangle_init(struct triangle_state *state, const struct triangle_config *config) {
@@ -852,13 +873,13 @@ static void init_empty() {
 
         glide_configure(&osc->glide_config, NO_GLIDE_INCREMENT);
         adsr_configure(&osc->pwm_env_config, 0, 1, 0, 1, 0, 1, 0);
-        triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
+        triangle_configure_constant(&osc->pwm_lfo_config, 0);
 
         adsr_configure(&osc->amp_env_config, 0, 1, 0, 1, 0, 1, 0);
-        triangle_configure(&osc->amp_lfo_config, 0, 0, 0, 1);
+        triangle_configure_constant(&osc->amp_lfo_config, 0);
 
         adsr_configure(&osc->pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
-        triangle_configure(&osc->pitch_lfo_config, 0, 0, 0, 1);
+        triangle_configure_constant(&osc->pitch_lfo_config, 0);
     }
 
     arp_configure(&global_config.arp_config, NULL, 0, 0);
@@ -939,7 +960,6 @@ static void mod_chorus() {
 static void init_wave() {
     for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
-        osc->wave = WAVE_PULSE;
 
         // Constant PWM
         triangle_configure(&osc->pwm_lfo_config, -120 << 8, 120 << 8, -120 << 8, 800);
@@ -1003,21 +1023,12 @@ static void init_wobble_bass() {
 
     for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
-        osc->wave = WAVE_PULSE;
 
         // No glide
         glide_configure(&osc->glide_config, NO_GLIDE_INCREMENT);
 
-        // PWM on upper octave
-        triangle_configure(&osc->pwm_lfo_config, 0, 0, 0, 1);
-
         // Basic amplitude envelope, no amplitude LFO
         adsr_configure(&osc->amp_env_config, 0, 1, 64 << 8, 1, 64 << 8, 300, 0);
-        triangle_configure(&osc->amp_lfo_config, 0, 0, 0, 1);
-
-        // No pitch LFO
-        adsr_configure(&osc->pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
-        triangle_configure(&osc->pitch_lfo_config, 0, 0, 0, 1);
 
         // No noise channel
         if (i == 2) {
@@ -1119,15 +1130,49 @@ static void init_drums() {
 
         osc->wave = WAVE_NOISE;
         osc->chromatic = false;
+
+        // Turn on the pitch triangle wave at a constant 127
+        // since this is multiplied by the pitch envelope.
+        // This allows the pitch envelope to do its thing
+        triangle_configure_constant(&osc->pitch_lfo_config, 127 << 8);
     }
 }
 
 static void trigger_drums(uint8_t k, uint8_t osc_index) {
     struct osc_state *osc = &global.osc[osc_index];
 
-    // Basic amplitude envelope, no amplitude LFO
-    adsr_configure(&osc->amp_env_config, 0, 1, 127 << 8, 300, 64 << 8, 100, 0);
-    osc->amp_env_config.s_value = 0;
+    switch (k) {
+        case 35:
+        case 36:
+            // KICK DRUM
+            // Basic amplitude envelope
+            // and weep down the pitch of the noise very quickly
+            adsr_configure_percussion(&osc->amp_env_config, 127 << 8, 400, 0);
+            adsr_configure_percussion(&osc->pitch_env_config, 100 << 8, 50, 0);
+            break;
+        case 38:
+        case 40:
+            // SNARE DRUM
+            // Basic amplitude envelope
+            // and sweep down the pitch
+            adsr_configure_percussion(&osc->amp_env_config, 127 << 8, 400, 0);
+            adsr_configure_percussion(&osc->pitch_env_config, 100 << 8, 50, 75 << 8);
+            break;
+        case 42:
+            // CLOSED HI-HAT
+            // Basic amplitude envelope
+            adsr_configure_percussion(&osc->amp_env_config, 127 << 8, 30, 0);
+            adsr_configure_percussion(&osc->pitch_env_config, 100 << 8, 1, 100 << 8);
+            break;
+        default:
+            // No sound
+            adsr_configure_percussion(&osc->amp_env_config, 0, 1, 0);
+            adsr_configure_percussion(&osc->pitch_env_config, 0, 1, 0);
+            break;
+    }
+
+    adsr_init(&osc->amp_env, &osc->amp_env_config);
+    adsr_init(&osc->pitch_env, &osc->pitch_env_config);
 }
 
 /*
