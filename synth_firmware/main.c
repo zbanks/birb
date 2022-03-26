@@ -43,7 +43,6 @@ enum mode {
     MODE_MONO,
     MODE_POLY,
     MODE_OCTAVE,
-    MODE_NOISE,
 };
 
 enum wave {
@@ -407,6 +406,7 @@ struct osc_state {
     uint16_t timer_period_low;
     uint8_t t;
 
+    bool chromatic;
     uint8_t triggered_note;
     uint8_t triggered_velocity;
 
@@ -507,6 +507,7 @@ static uint16_t period(int16_t note) {
 static void global_osc_init() {
     for (int i = 0; i < N_OSC; i++) {
         global.osc[i].wave = WAVE_PULSE;
+        global.osc[i].chromatic = true;
         global.osc[i].prescaler = 0;
         global.osc[i].timer_period_high = 1250;
         global.osc[i].timer_period_low = 1250;
@@ -521,6 +522,8 @@ static void global_osc_init() {
         glide_init(&global.osc[i].glide, &global.osc[i].glide_config);
     }
 }
+
+static void patch_trigger();
 
 static void note_off_mono(uint8_t note_index_to_remove) {
     note_velocity[note_index_to_remove] = 0;
@@ -643,35 +646,6 @@ static void note_on_octave(uint8_t k, uint8_t v) {
     osc_note_velocity[1] = v;
 }
 
-static void note_off_noise(uint8_t note_index_to_remove) {
-    note_velocity[note_index_to_remove] = 0;
-
-    // See if there's another note playing
-    for (int i = 0; i < N_NOTES; i++) {
-        if (note_velocity[i] > 0) {
-            osc_note_index[0] = note_index[i];
-            osc_note_velocity[0] = note_velocity[i];
-            osc_note_index[2] = WHITE_NOISE_PITCH;
-            osc_note_velocity[2] = note_velocity[i];
-            return;
-        }
-    }
-
-    // No notes left playing
-    osc_note_velocity[0] = 0;
-    osc_note_velocity[2] = 0;
-}
-
-static void note_on_noise(uint8_t k, uint8_t v) {
-    note_index[0] = k;
-    note_velocity[0] = v;
-
-    osc_note_index[0] = k;
-    osc_note_velocity[0] = v;
-    osc_note_index[2] = WHITE_NOISE_PITCH;
-    osc_note_velocity[2] = v;
-}
-
 static void all_notes_off() {
     for (int i = 0; i < N_NOTES; i++) {
         note_velocity[i] = 0;
@@ -725,10 +699,9 @@ static void note_on(uint8_t k, uint8_t v) {
         case MODE_OCTAVE:
             note_on_octave(k, v);
             break;
-        case MODE_NOISE:
-            note_on_noise(k, v);
-            break;
     }
+
+    patch_trigger(note_index[0], note_osc[0]);
 }
 
 static void note_off(uint8_t k) {
@@ -755,9 +728,6 @@ static void note_off(uint8_t k) {
             break;
         case MODE_OCTAVE:
             note_off_octave(note_index_to_remove);
-            break;
-        case MODE_NOISE:
-            note_off_noise(note_index_to_remove);
             break;
     }
 
@@ -896,6 +866,12 @@ static void init_empty() {
 
 static void mod_empty() {
 }
+
+static void trigger_empty(uint8_t k, uint8_t osc_index) {
+    (void)k;
+    (void)osc_index;
+}
+
 
 static void init_basic() {
     global_config.mode = MODE_POLY;
@@ -1134,6 +1110,26 @@ static void mod_pluck_bass() {
         osc->pwm_env_config.r_incr = -(int16_t)pwm_amt - 1;
     }
 }
+
+static void init_drums() {
+    global_config_adjust_range(2);
+
+    for (int i = 0; i < N_OSC; i++) {
+        struct osc_state *osc = &global.osc[i];
+
+        osc->wave = WAVE_NOISE;
+        osc->chromatic = false;
+    }
+}
+
+static void trigger_drums(uint8_t k, uint8_t osc_index) {
+    struct osc_state *osc = &global.osc[osc_index];
+
+    // Basic amplitude envelope, no amplitude LFO
+    adsr_configure(&osc->amp_env_config, 0, 1, 127 << 8, 300, 64 << 8, 100, 0);
+    osc->amp_env_config.s_value = 0;
+}
+
 /*
 
 const int8_t arp_octave_notes[] = {-12, 0};
@@ -1191,54 +1187,67 @@ static void mod_basic() {
 static const struct patches {
     void (*init_fn)();
     void (*mod_fn)();
+    void (*trigger_fn)(uint8_t k, uint8_t osc_index);
 } patches[N_SELECTOR_POSITIONS] = {
     {
         .init_fn = init_basic,
         .mod_fn = mod_basic,
+        .trigger_fn = trigger_empty,
     },
     {
         .init_fn = init_chorus,
         .mod_fn = mod_chorus,
+        .trigger_fn = trigger_empty,
     },
     {
         .init_fn = init_wave,
         .mod_fn = mod_wave,
+        .trigger_fn = trigger_empty,
     },
     {
         .init_fn = init_bass,
         .mod_fn = mod_bass,
+        .trigger_fn = trigger_empty,
     },
     {
         .init_fn = init_wobble_bass,
         .mod_fn = mod_wobble_bass,
+        .trigger_fn = trigger_empty,
     },
     {
         .init_fn = init_empty, // XXX hardware bug: skip this slot
         .mod_fn = mod_empty,
+        .trigger_fn = trigger_empty,
     },
     {
         .init_fn = init_pluck_bass,
         .mod_fn = mod_pluck_bass,
+        .trigger_fn = trigger_empty,
+    },
+    {
+        .init_fn = init_drums,
+        .mod_fn = mod_empty,
+        .trigger_fn = trigger_drums,
     },
     {
         .init_fn = init_empty,
         .mod_fn = mod_empty,
+        .trigger_fn = trigger_empty,
     },
     {
         .init_fn = init_empty,
         .mod_fn = mod_empty,
+        .trigger_fn = trigger_empty,
     },
     {
         .init_fn = init_empty,
         .mod_fn = mod_empty,
+        .trigger_fn = trigger_empty,
     },
     {
         .init_fn = init_empty,
         .mod_fn = mod_empty,
-    },
-    {
-        .init_fn = init_empty,
-        .mod_fn = mod_empty,
+        .trigger_fn = trigger_empty,
     },
 };
 
@@ -1249,6 +1258,10 @@ static void patch_init() {
 
 static void patch_mod() {
     patches[knobs.select].mod_fn();
+}
+
+static void patch_trigger() {
+    patches[knobs.select].trigger_fn(note_index[0], note_osc[0]);
 }
 
 static void read_knobs() {
@@ -1305,7 +1318,7 @@ static void update_modulation() {
     // Advance each oscillator
     for (int i=0; i<N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
-        uint8_t note = osc_note_index[i];
+        uint8_t note = osc->chromatic ? osc_note_index[i] : 0;
         uint8_t velocity = osc_note_velocity[i];
 
         // Advance pwm LFO
