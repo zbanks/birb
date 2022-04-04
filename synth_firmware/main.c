@@ -345,6 +345,33 @@ static int16_t glide_update(struct glide_state *state, const struct glide_config
     return state->last_pitch;
 }
 
+struct sample_config {
+    const uint8_t *data;
+    uint16_t length;
+    uint16_t period;
+};
+
+struct sample_state {
+    int8_t out;
+    uint16_t t;
+};
+
+static void sample_configure(struct sample_config *config, const uint8_t *data, uint16_t length, uint16_t period) {
+    config->data = data;
+    config->length = length;
+    config->period = period;
+}
+
+static void sample_init(struct sample_state *state, const struct sample_config *config) {
+    (void)config;
+    state->out = 0;
+    state->t = 0;
+}
+
+static bool sample_finished(struct sample_state *state, const struct sample_config *config) {
+    return state->t >= config->length;
+}
+
 static void rx(uint8_t byte) {
     static enum {
         UNKNOWN,
@@ -429,7 +456,6 @@ struct osc_state {
     uint16_t timer_period_high;
     uint16_t timer_period_low;
     uint8_t t8;
-    uint16_t t16;
 
     bool chromatic;
     uint8_t triggered_note;
@@ -444,6 +470,7 @@ struct osc_state {
     struct adsr_config pwm_env_config;
     struct triangle_config pwm_lfo_config;
     struct glide_config glide_config;
+    struct sample_config sample_config;
 
     struct adsr_state amp_env;
     struct triangle_state amp_lfo;
@@ -452,13 +479,10 @@ struct osc_state {
     struct adsr_state pwm_env;
     struct triangle_state pwm_lfo;
     struct glide_state glide;
-
-    uint16_t sample_length;
-    const uint8_t *sample;
+    struct sample_state sample;
 
     // Output stuff
     int8_t amplitude;
-    int8_t out;
 };
 
 #define MIN_PER 300
@@ -521,25 +545,25 @@ static bool osc_handle_timer_sample(struct osc_state *state, int8_t *out, volati
     // returns the output signal level
     // and updates next_period with the time until this function should be called next
 
-    uint16_t byte_index = state->t16 >> 3;
-    uint16_t bit_index = state->t16 & 7;
+    uint16_t byte_index = state->sample.t >> 3;
+    uint16_t bit_index = state->sample.t & 7;
 
-    if (state->t16 >= state->sample_length) {
+    if (state->sample.t >= state->sample_config.length) {
         *out = 0;
         *next_period = 1250;
         return true;
     }
 
-    if (state->sample[byte_index] & (1 << bit_index)) {
-        state->out += 2;
+    if (state->sample_config.data[byte_index] & (1 << bit_index)) {
+        state->sample.out += 2;
     } else {
-        state->out -= 2;
+        state->sample.out -= 2;
     }
 
-    state->t16++;
+    state->sample.t++;
 
-    *out = state->out;
-    *next_period = state->timer_period_high;
+    *out = state->sample.out;
+    *next_period = state->sample_config.period;
     return true;
 }
 
@@ -568,11 +592,7 @@ static void global_osc_init() {
         global.osc[i].timer_period_high = 1250;
         global.osc[i].timer_period_low = 1250;
         global.osc[i].t8 = 0;
-        global.osc[i].t16 = 0;
-        global.osc[i].out = 0;
         global.osc[i].amplitude = 0;
-        global.osc[i].sample_length = 0;
-        global.osc[i].sample = NULL;
         adsr_init(&global.osc[i].amp_env, &global.osc[i].amp_env_config);
         triangle_init(&global.osc[i].amp_lfo, &global.osc[i].amp_lfo_config);
         adsr_init(&global.osc[i].pitch_env, &global.osc[i].pitch_env_config);
@@ -580,6 +600,7 @@ static void global_osc_init() {
         adsr_init(&global.osc[i].pwm_env, &global.osc[i].pwm_env_config);
         triangle_init(&global.osc[i].pwm_lfo, &global.osc[i].pwm_lfo_config);
         glide_init(&global.osc[i].glide, &global.osc[i].glide_config);
+        sample_init(&global.osc[i].sample, &global.osc[i].sample_config);
     }
 }
 
@@ -919,6 +940,8 @@ static void init_empty() {
 
         adsr_configure(&osc->pitch_env_config, 0, 1, 0, 1, 0, 1, 0);
         triangle_configure_constant(&osc->pitch_lfo_config, 0);
+
+        sample_configure(&osc->sample_config, NULL, 0, 0);
     }
 
     arp_configure(&global_config.arp_config, NULL, 0, 0);
@@ -1224,16 +1247,16 @@ static void init_sample() {
     }
 }
 
+static void osc_sample_play(struct osc_state *state, const uint8_t *data, uint16_t length, uint16_t period) {
+    sample_configure(&state->sample_config, data, length, period);
+    sample_init(&state->sample, &state->sample_config);
+    state->amplitude = 1; // Mark sample as playing
+}
+
 static void trigger_sample(uint8_t k, uint8_t osc_index) {
     struct osc_state *osc = &global.osc[osc_index];
 
-    // Begin playing sample
-    osc->timer_period_high = 350;
-    osc->sample_length = sizeof (DOUBLE_DRIBBLE) * 8;
-    osc->sample = DOUBLE_DRIBBLE;
-    osc->out = 0;
-    osc->t16 = 0;
-    osc->amplitude = 1; // Mark sample as playing
+    osc_sample_play(osc, DOUBLE_DRIBBLE, sizeof (DOUBLE_DRIBBLE) * 8, 350);
 }
 
 /*
@@ -1436,9 +1459,8 @@ static void update_modulation() {
         }
 
         if (osc->wave == WAVE_SAMPLE) {
-            if (osc->t16 >= osc->sample_length) {
+            if (sample_finished(&osc->sample, &osc->sample_config)) {
                 // Mark sample as finished
-                osc->sample_length = 0;
                 osc->amplitude = 0;
             }
         } else {
