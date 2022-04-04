@@ -453,7 +453,6 @@ struct osc_state {
     struct triangle_state pwm_lfo;
     struct glide_state glide;
 
-    uint8_t sample_gate;
     uint16_t sample_length;
     const uint8_t *sample;
 
@@ -527,9 +526,8 @@ static bool osc_handle_timer_sample(struct osc_state *state, int8_t *out, volati
 
     if (state->t16 >= state->sample_length) {
         *out = 0;
-        //state->t16 = 0; // XXX
         *next_period = 1250;
-        return false;
+        return true;
     }
 
     if (state->sample[byte_index] & (1 << bit_index)) {
@@ -541,8 +539,7 @@ static bool osc_handle_timer_sample(struct osc_state *state, int8_t *out, volati
     state->t16++;
 
     *out = state->out;
-    //*next_period = state->timer_period_high;
-    *next_period = 350;
+    *next_period = state->timer_period_high;
     return true;
 }
 
@@ -574,6 +571,8 @@ static void global_osc_init() {
         global.osc[i].t16 = 0;
         global.osc[i].out = 0;
         global.osc[i].amplitude = 0;
+        global.osc[i].sample_length = 0;
+        global.osc[i].sample = NULL;
         adsr_init(&global.osc[i].amp_env, &global.osc[i].amp_env_config);
         triangle_init(&global.osc[i].amp_lfo, &global.osc[i].amp_lfo_config);
         adsr_init(&global.osc[i].pitch_env, &global.osc[i].pitch_env_config);
@@ -1168,7 +1167,7 @@ static void init_drums() {
     for (int i = 0; i < N_OSC; i++) {
         struct osc_state *osc = &global.osc[i];
 
-        osc->wave = WAVE_SAMPLE; // XXX
+        osc->wave = WAVE_NOISE;
         osc->chromatic = false;
 
         // Turn on the pitch triangle wave at a constant 127
@@ -1213,6 +1212,28 @@ static void trigger_drums(uint8_t k, uint8_t osc_index) {
 
     adsr_init(&osc->amp_env, &osc->amp_env_config);
     adsr_init(&osc->pitch_env, &osc->pitch_env_config);
+}
+
+static void init_sample() {
+    global_config_adjust_range(2);
+
+    for (int i = 0; i < N_OSC; i++) {
+        struct osc_state *osc = &global.osc[i];
+
+        osc->wave = WAVE_SAMPLE;
+    }
+}
+
+static void trigger_sample(uint8_t k, uint8_t osc_index) {
+    struct osc_state *osc = &global.osc[osc_index];
+
+    // Begin playing sample
+    osc->timer_period_high = 350;
+    osc->sample_length = sizeof (DOUBLE_DRIBBLE) * 8;
+    osc->sample = DOUBLE_DRIBBLE;
+    osc->out = 0;
+    osc->t16 = 0;
+    osc->amplitude = 1; // Mark sample as playing
 }
 
 /*
@@ -1315,9 +1336,9 @@ static const struct patches {
         .trigger_fn = trigger_drums,
     },
     {
-        .init_fn = init_empty,
+        .init_fn = init_sample,
         .mod_fn = mod_empty,
-        .trigger_fn = trigger_empty,
+        .trigger_fn = trigger_sample,
     },
     {
         .init_fn = init_empty,
@@ -1414,45 +1435,12 @@ static void update_modulation() {
             gate = note + 1;
         }
 
-        // Pitch calculations:
-
-        // Advance pitch LFO
-        int16_t pitch_lfo_value = triangle_update(&osc->pitch_lfo, &global.osc[i].pitch_lfo_config, notes_held);
-
-        // Advance pitch envelope generator
-        int16_t pitch_env_value = adsr_update(&osc->pitch_env, &osc->pitch_env_config, gate);
-
-        // Apply pitch glide
-        int16_t glided_pitch = glide_update(&osc->glide, &osc->glide_config, (osc->triggered_note + arp_note) << 8, notes_held);
-        int16_t pitch_adjust = ((int32_t)pitch_env_value * pitch_lfo_value) >> 15;
-
-        // Calculate timer periods
-        uint16_t output_period = period(glided_pitch + pitch_adjust);
-
         if (osc->wave == WAVE_SAMPLE) {
             if (osc->t16 >= osc->sample_length) {
                 // Mark sample as finished
                 osc->sample_length = 0;
                 osc->amplitude = 0;
             }
-
-            // Calculate timer periods
-            uint16_t output_period = period(glided_pitch + pitch_adjust);
-            if (output_period < MIN_PER) {
-                output_period = MIN_PER;
-            }
-            osc->timer_period_high = output_period;
-
-            // Check for trigger
-            if (gate && gate != osc->sample_gate) {
-                // Begin playing sample
-                osc->sample_length = sizeof (DOUBLE_DRIBBLE) * 8;
-                osc->sample = DOUBLE_DRIBBLE;
-                osc->out = 0;
-                osc->t16 = 0;
-                osc->amplitude = 1; // Mark sample as playing
-            }
-            osc->sample_gate = gate;
         } else {
             // Advance pwm LFO
             uint16_t pwm_lfo_value = triangle_update(&osc->pwm_lfo, &global.osc[i].pwm_lfo_config, notes_held);
@@ -1466,7 +1454,19 @@ static void update_modulation() {
             // Advance amplitude envelope generator
             int16_t amp_env_value = adsr_update(&osc->amp_env, &osc->amp_env_config, gate);
 
+            // Advance pitch LFO
+            int16_t pitch_lfo_value = triangle_update(&osc->pitch_lfo, &global.osc[i].pitch_lfo_config, notes_held);
+
+            // Advance pitch envelope generator
+            int16_t pitch_env_value = adsr_update(&osc->pitch_env, &osc->pitch_env_config, gate);
+
+            // Apply pitch glide
+            int16_t glided_pitch = glide_update(&osc->glide, &osc->glide_config, (osc->triggered_note + arp_note) << 8, notes_held);
+            int16_t pitch_adjust = ((int32_t)pitch_env_value * pitch_lfo_value) >> 15;
+
             // Calculate timer periods
+            uint16_t output_period = period(glided_pitch + pitch_adjust);
+
             if (output_period < 2 * MIN_PER) {
                 output_period = 2 * MIN_PER;
             }
