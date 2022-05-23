@@ -1,4 +1,4 @@
-20239690523302881
+20244550461973063
 Audio_Module
 Reverb_BTDR-1H
 Digital Reverberation Unit, http://www.belton.co.kr/inc/downfile.php?seq=17&file=pdf (footprint from http://www.uk-electronic.de/PDF/BTDR-1.pdf)
@@ -85777,10 +85777,31 @@ varistor SIOV
 0
 2
 2
-selector_switch
-LORIN_12P1T
+synth
+Alpha_16mm_Potentiometer_RA
 
 
 0
-13
-13
+3
+3
+synth
+DSC_1001_Oscillator_SMD_5032_4Pads
+Ceramic SMD crystal, 5.0x3.2mm, 4 Pads
+crystal oscillator quartz SMD SMT 5032
+0
+4
+4
+synth
+SOD-323-handsoldering
+SOD-323
+SOD-323
+0
+2
+2
+synth
+Tayda_3.5mm_stereo_TRS_jack_A-853
+
+
+0
+5
+5
